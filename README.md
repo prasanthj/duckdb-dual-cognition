@@ -121,7 +121,7 @@ Use `MATERIALIZED` CTEs when the stage boundary matters or a result is reference
 For selective escalation, keep the fast and reasoned paths in separate materialized stages, then merge them into one derived column. Only rows below the confidence threshold invoke System Two:
 
 ```sql
-WITH params(confidence_threshold) AS (VALUES (0.80)),
+WITH params(confidence_threshold) AS (VALUES (0.80::DOUBLE)),
 fast AS MATERIALIZED (
   SELECT id, evidence,
          system_one_choice(evidence, 'Classify the case',
@@ -129,7 +129,7 @@ fast AS MATERIALIZED (
            '"security":"access and data risk"}'::JSON) AS result
   FROM cases
 ), escalated AS MATERIALIZED (
-  SELECT id, result.choice AS fast_choice, result.confidence, confidence_threshold,
+  SELECT id, evidence, result.choice AS fast_choice, result.confidence, confidence_threshold,
          CASE WHEN result.confidence < confidence_threshold THEN
            (system_two_generate(
              {'evidence':evidence,'system_one_candidate':result.choice},
@@ -139,13 +139,33 @@ fast AS MATERIALIZED (
   FROM fast CROSS JOIN params
 )
 SELECT id,
+       evidence AS input,
        CASE
          WHEN confidence >= confidence_threshold THEN fast_choice
          WHEN reasoned_choice IN ('billing','technical','security') THEN reasoned_choice
          ELSE 'manual_review'
-       END AS classification
+       END AS classification,
+       struct_pack(
+         source := CASE
+           WHEN confidence >= confidence_threshold THEN 'system_one'
+           WHEN reasoned_choice IN ('billing','technical','security') THEN 'system_two'
+           ELSE 'manual_review'
+         END,
+         system_one_choice := fast_choice,
+         system_one_confidence := confidence,
+         confidence_threshold := confidence_threshold,
+         escalated := reasoned_choice IS NOT NULL,
+         system_two_choice := reasoned_choice
+       ) AS provenance
 FROM escalated;
 ```
+
+The result preserves the input beside the final derived column and carries an auditable DuckDB `STRUCT`:
+
+| id | input | classification | provenance |
+|---:|---|---|---|
+| 0 | Duplicate invoice charge | billing | `{source: system_one, system_one_choice: billing, system_one_confidence: 0.95, confidence_threshold: 0.80, escalated: false, system_two_choice: NULL}` |
+| 1 | Account access fails intermittently after login | technical | `{source: system_two, system_one_choice: security, system_one_confidence: 0.55, confidence_threshold: 0.80, escalated: true, system_two_choice: technical}` |
 
 ## Throughput controls
 

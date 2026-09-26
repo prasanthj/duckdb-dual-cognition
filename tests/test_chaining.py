@@ -63,14 +63,14 @@ def test_low_confidence_classification_escalates_into_same_derived_column(
     db: duckdb.DuckDBPyConnection, stub: Stub
 ) -> None:
     stub.mode = "mixed_confidence"
-    stub.system_two_value = "security"
+    stub.system_two_value = "technical"
 
     rows = db.execute(
-        """WITH params(confidence_threshold) AS (VALUES (0.80)),
+        """WITH params(confidence_threshold) AS (VALUES (0.80::DOUBLE)),
            inputs(id, evidence) AS (
                VALUES
                  (0, 'Duplicate invoice charge'),
-                 (1, 'Unclear report of unusual account access')
+                 (1, 'Account access fails intermittently after login')
            ), fast AS MATERIALIZED (
                SELECT id, evidence,
                       system_one_choice(
@@ -93,21 +93,57 @@ def test_low_confidence_classification_escalates_into_same_derived_column(
                FROM fast CROSS JOIN params
            )
            SELECT id,
+                  evidence AS input,
                   CASE
                     WHEN fast_confidence >= confidence_threshold THEN fast_choice
                     WHEN system_two_choice IN ('billing','technical','security')
                       THEN system_two_choice
                     ELSE 'manual_review'
                   END AS classification,
-                  fast_confidence,
-                  system_two_choice IS NOT NULL AS escalated
+                  struct_pack(
+                    source := CASE
+                      WHEN fast_confidence >= confidence_threshold THEN 'system_one'
+                      WHEN system_two_choice IN ('billing','technical','security')
+                        THEN 'system_two'
+                      ELSE 'manual_review'
+                    END,
+                    system_one_choice := fast_choice,
+                    system_one_confidence := fast_confidence,
+                    confidence_threshold := confidence_threshold,
+                    escalated := system_two_choice IS NOT NULL,
+                    system_two_choice := system_two_choice
+                  ) AS provenance
            FROM escalated
            ORDER BY id"""
     ).fetchall()
 
     assert rows == [
-        (0, "billing", 0.95, False),
-        (1, "security", 0.55, True),
+        (
+            0,
+            "Duplicate invoice charge",
+            "billing",
+            {
+                "source": "system_one",
+                "system_one_choice": "billing",
+                "system_one_confidence": 0.95,
+                "confidence_threshold": 0.8,
+                "escalated": False,
+                "system_two_choice": None,
+            },
+        ),
+        (
+            1,
+            "Account access fails intermittently after login",
+            "technical",
+            {
+                "source": "system_two",
+                "system_one_choice": "security",
+                "system_one_confidence": 0.55,
+                "confidence_threshold": 0.8,
+                "escalated": True,
+                "system_two_choice": "technical",
+            },
+        ),
     ]
     assert [call["path"] for call in stub.calls] == [
         "/v1/systemone",
