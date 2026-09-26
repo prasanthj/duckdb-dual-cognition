@@ -11,7 +11,7 @@ Compose fast, bounded System One judgments with selective System Two reasoning i
 
 ![Animated terminal walkthrough: confidence-gated classification, selective System Two escalation, and decision provenance](docs/images/terminal-demo.gif)
 
-*Deterministic local protocol demo; no paid endpoints are contacted. It runs the real native extension and can be reproduced with `vhs examples/terminal_demo.tape`.*
+*Captured from a live run against TypeSafe Jev 1.13.0 and OpenAI gpt-5.6-luna. Eight support cases were classified in one System One batch; the two rows below the 0.90 confidence threshold were escalated together in one System Two batch. The captured run completed in 2.28 seconds with no retries. This is one end-to-end composition run, not a latency benchmark. Reproduce it with `TYPESAFE_API_KEY=... OPENAI_API_KEY=... vhs examples/live_terminal_demo.tape` (provider charges apply).*
 
 ## Why dual cognition?
 
