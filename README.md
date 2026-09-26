@@ -26,6 +26,10 @@ The useful pattern is composition. Run System One across the full relation, rout
 
 For standalone System One throughput, scaling measurements, and the streaming implementation, see [Jev for DuckDB](https://github.com/prasanthj/duckdb-jev). This repository focuses on composing both systems safely in the same query.
 
+## Interactive example
+
+[Chain Command](examples/chain-command) is a playable supply-chain control tower. It sends each live incident to System One for an immediate constrained action, applies deterministic operational consequences, then asks System Two to explain the decision, tradeoff, strongest alternative, and next signal to watch. The original gamified artifact includes a 12-incident shift, 27 event families, animated network objects, an expressive robot operator, autopilot, carry-forward consequences, complete provenance, and a captured live walkthrough.
+
 ## Features
 
 - **Two systems, one relation:** bounded judgment and generative transformation compose through ordinary SQL and materialized CTEs.
