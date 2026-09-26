@@ -38,6 +38,7 @@ class Stub:
         self.status_sequence: list[int] = []
         self.retry_after: str | None = None
         self.mode = "normal"
+        self.system_two_value: str | None = None
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -88,7 +89,7 @@ class Stub:
                                 fields = schema if isinstance(schema, list) else schema.get("required", list(schema))
                                 value = json.dumps({field: f"{field}:{evidence}" for field in fields})
                             else:
-                                value = f"{instruction} | {evidence}"
+                                value = owner.system_two_value or f"{instruction} | {evidence}"
                             results.append({"id": item["id"], "value": value})
                         result = {
                             "model": "gpt-5.6-luna-stub",
@@ -126,6 +127,8 @@ class Stub:
                                 }
                             if owner.mode == "distinct_confidence" and kind != "noul":
                                 answer["confidence"] = 0.73
+                            if owner.mode == "mixed_confidence" and kind != "noul":
+                                answer["confidence"] = 0.95 if int(number) % 2 == 0 else 0.55
                             if owner.mode == "large_answers":
                                 answer["extra"] = "x" * (1024 * 1024)
                             answers[key] = answer

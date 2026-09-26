@@ -118,6 +118,35 @@ FROM summarized;
 
 Use `MATERIALIZED` CTEs when the stage boundary matters or a result is referenced more than once.
 
+For selective escalation, keep the fast and reasoned paths in separate materialized stages, then merge them into one derived column. Only rows below the confidence threshold invoke System Two:
+
+```sql
+WITH params(confidence_threshold) AS (VALUES (0.80)),
+fast AS MATERIALIZED (
+  SELECT id, evidence,
+         system_one_choice(evidence, 'Classify the case',
+           '{"billing":"payments","technical":"product failures",'
+           '"security":"access and data risk"}'::JSON) AS result
+  FROM cases
+), escalated AS MATERIALIZED (
+  SELECT id, result.choice AS fast_choice, result.confidence, confidence_threshold,
+         CASE WHEN result.confidence < confidence_threshold THEN
+           (system_two_generate(
+             {'evidence':evidence,'system_one_candidate':result.choice},
+             'Return exactly one label: billing, technical, or security'
+           )).value
+         END AS reasoned_choice
+  FROM fast CROSS JOIN params
+)
+SELECT id,
+       CASE
+         WHEN confidence >= confidence_threshold THEN fast_choice
+         WHEN reasoned_choice IN ('billing','technical','security') THEN reasoned_choice
+         ELSE 'manual_review'
+       END AS classification
+FROM escalated;
+```
+
 ## Throughput controls
 
 Both paths deduplicate equal rows inside a chunk, share in-flight work inside a query, batch independent rows, and run bounded concurrent requests. Defaults are conservative and can be changed per connection.
