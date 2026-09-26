@@ -28,7 +28,7 @@ CASES = [
     (3, "API latency tripled after deployment and production requests now time out."),
     (4, "An unknown administrator exported customer records before a forced password reset."),
     (5, "Webhook delivery fails only for invoices currently under chargeback review."),
-    (6, "Finance cannot open invoices because the new role permissions deny access."),
+    (6, "The renewal quote is inaccessible because role mappings broke after SSO setup."),
     (7, "A suspected compromised token is also causing intermittent data-sync failures."),
     (8, "Please explain the renewal quote and why this month's amount increased."),
 ]
@@ -65,6 +65,8 @@ def configure(db: duckdb.DuckDBPyConnection) -> None:
     db.execute("SET dc_system_one_concurrency=10")
     db.execute("SET dc_system_two_batch_size=25")
     db.execute("SET dc_system_two_concurrency=5")
+    db.execute("SET dc_system_one_session_cache_bytes=8388608")
+    db.execute("SET dc_system_two_session_cache_bytes=8388608")
 
 
 def classify(db: duckdb.DuckDBPyConnection, threshold: float) -> list[tuple[Any, ...]]:
@@ -91,6 +93,7 @@ def classify(db: duckdb.DuckDBPyConnection, threshold: float) -> list[tuple[Any,
                       result.choice AS system_one_choice,
                       result.confidence AS system_one_confidence,
                       result.model AS system_one_model,
+                      result.cache_hit AS system_one_cache_hit,
                       confidence_threshold,
                       CASE WHEN result.confidence < confidence_threshold THEN
                         system_two_extract(
@@ -99,7 +102,11 @@ def classify(db: duckdb.DuckDBPyConnection, threshold: float) -> list[tuple[Any,
                             'system_one_candidate': result.choice,
                             'allowed_labels': ['billing', 'technical', 'security']
                           }},
-                          'Resolve the ambiguous classification. The classification field must be exactly one allowed label.',
+                          'Resolve the ambiguous classification by its primary operational cause. '
+                          'Treat SSO, SCIM, webhook, API, sync, and integration failures as technical '
+                          'unless there is evidence of actual compromise or data exposure. Treat '
+                          'amount, price, refund, and invoice disputes as billing. The classification '
+                          'field must be exactly one allowed label.',
                           '["classification"]'::JSON
                         )
                       END AS system_two_result
@@ -128,7 +135,9 @@ def classify(db: duckdb.DuckDBPyConnection, threshold: float) -> list[tuple[Any,
                       confidence_threshold := confidence_threshold,
                       escalated := system_two_result IS NOT NULL,
                       system_two_choice := system_two_choice,
-                      system_two_model := system_two_result.model
+                      system_two_model := system_two_result.model,
+                      system_one_cache_hit := system_one_cache_hit,
+                      system_two_cache_hit := system_two_result.cache_hit
                     ) AS provenance
              FROM resolved ORDER BY id""",
         params,
@@ -136,7 +145,7 @@ def classify(db: duckdb.DuckDBPyConnection, threshold: float) -> list[tuple[Any,
 
 
 def main() -> None:
-    threshold = float(os.environ.get("DC_DEMO_THRESHOLD", "0.90"))
+    threshold = float(os.environ.get("DC_DEMO_THRESHOLD", "0.50"))
     db = duckdb.connect(config={"allow_unsigned_extensions": True, "threads": 4})
     try:
         configure(db)
@@ -150,9 +159,7 @@ def main() -> None:
         print("Return one final classification plus complete decision provenance.")
         sys.stdout.flush()
 
-        started = time.perf_counter()
         rows = classify(db, threshold)
-        elapsed = time.perf_counter() - started
 
         heading("RESULT")
         print(f"{DIM}id  final       source       System One        System Two{RESET}")
@@ -198,7 +205,19 @@ def main() -> None:
             f"{PURPLE}System Two{RESET}  {two[1]} request · {two[2]} escalations · "
             f"{two[3]} retries · {two[4] + two[5]} tokens"
         )
-        print(f"\n{BOLD}{GREEN}{len(rows)} final rows in {elapsed:.2f}s; {escalated} required deeper reasoning.{RESET}")
+        print(f"\n{BOLD}{GREEN}{len(rows)} final rows; {escalated} required deeper reasoning.{RESET}")
+
+        before_replay = {system: values for system, *values in db.execute("SELECT * FROM dc_stats()").fetchall()}
+        replay = classify(db, threshold)
+        after_replay = {system: values for system, *values in db.execute("SELECT * FROM dc_stats()").fetchall()}
+        replay_requests = sum(after_replay[name][0] - before_replay[name][0] for name in before_replay)
+        system_one_hits = sum(bool(row[3]["system_one_cache_hit"]) for row in replay)
+        system_two_rows = [row for row in replay if row[3]["escalated"]]
+        system_two_hits = sum(bool(row[3]["system_two_cache_hit"]) for row in system_two_rows)
+        heading("IDENTICAL QUERY REPLAY")
+        print(f"{GREEN}System One cache hits{RESET}  {system_one_hits}/{len(replay)} rows")
+        print(f"{PURPLE}System Two cache hits{RESET}  {system_two_hits}/{len(system_two_rows)} escalated rows")
+        print(f"{BOLD}{GREEN}New provider requests: {replay_requests}{RESET}")
         print(f"{DIM}LIVE_DEMO_COMPLETE{RESET}")
         time.sleep(2)
     finally:

@@ -11,7 +11,7 @@ Compose fast, bounded System One judgments with selective System Two reasoning i
 
 ![Animated terminal walkthrough: confidence-gated classification, selective System Two escalation, and decision provenance](docs/images/terminal-demo.gif)
 
-*Captured from a live run against TypeSafe Jev 1.13.0 and OpenAI gpt-5.6-luna. Eight support cases were classified in one System One batch; the two rows below the 0.90 confidence threshold were escalated together in one System Two batch. The captured run completed in 2.28 seconds with no retries. This is one end-to-end composition run, not a latency benchmark. Reproduce it with `TYPESAFE_API_KEY=... OPENAI_API_KEY=... vhs examples/live_terminal_demo.tape` (provider charges apply).*
+*Captured from a live run against TypeSafe Jev 1.13.0 and OpenAI gpt-5.6-luna. Eight support cases were classified in one System One batch, and rows below the 0.50 confidence threshold were resolved by System Two with complete provenance. Repeating the identical SQL produced 8/8 System One cache hits, cache hits for every escalated System Two row, and zero new provider requests. Requests run concurrently within each stage when a workload produces multiple batches; the two stages are sequential because the confidence gate determines which rows reach System Two. Reproduce it with `TYPESAFE_API_KEY=... OPENAI_API_KEY=... vhs examples/live_terminal_demo.tape` (provider charges apply).*
 
 ## Why dual cognition?
 

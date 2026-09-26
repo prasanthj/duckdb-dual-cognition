@@ -22,4 +22,4 @@ Wait+Screen /DUCKDB DUAL COGNITION · LIVE/
 Wait+Screen /RESULT/
 Wait+Screen /PROVENANCE · ESCALATED ROWS/
 Wait+Screen /LIVE_DEMO_COMPLETE/
-Sleep 2s
+Sleep 10s
