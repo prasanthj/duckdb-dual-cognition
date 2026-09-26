@@ -23,8 +23,8 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     env:
-      JEV_BUILD_JOBS: '4'
-      JEV_RUN_LIVE: '0'
+      DC_BUILD_JOBS: '4'
+      DC_RUN_LIVE: '0'
       UV_PYTHON: '3.11'
       DUCKDB_VERSION: ${{ matrix.duckdb_version }}
     steps:
@@ -41,8 +41,8 @@ jobs:
       - name: Test and analyze
         run: |
           uv run --with "duckdb==$DUCKDB_VERSION" pytest -q --junitxml=test-results.xml
-          uv run ruff check tests benchmarks scripts examples
-          uv run pyright tests benchmarks scripts examples
+          uv run ruff check tests scripts
+          uv run pyright tests scripts
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

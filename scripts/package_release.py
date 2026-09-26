@@ -33,18 +33,15 @@ def main() -> None:
         choices=["1.4.5", "1.5.5"],
     )
     args = parser.parse_args()
-    binary = ROOT / "build/extension/jev/jev.duckdb_extension"
-    # The smoke query is deliberately null and must not perform inference.
-    # Supply a non-secret placeholder because extension configuration still
-    # validates credentials, and point any regression at closed loopback.
-    os.environ["TYPESAFE_API_KEY"] = "package-smoke-never-sent"
+    build_dir = Path(os.environ.get("DC_BUILD_DIR", ROOT / "build"))
+    binary = build_dir / "extension/dc/dc.duckdb_extension"
+    # A NULL smoke query proves the binary loads without dispatching inference.
     with duckdb.connect(config={"allow_unsigned_extensions": True}) as con:
         actual = con.execute("PRAGMA platform").fetchone()
         if actual != (args.platform,) or duckdb.__version__ != args.duckdb_version:
             raise RuntimeError(f"Runtime mismatch: DuckDB {duckdb.__version__}, platform {actual}")
         con.execute(f"LOAD '{binary}'")
-        con.execute("SET jev_endpoint = 'http://127.0.0.1:1/v1/systemone'")
-        if con.execute("SELECT jev_noul(NULL,'no API call')").fetchone() != (None,):
+        if con.execute("SELECT system_one_noul(NULL,'no API call')").fetchone() != (None,):
             raise RuntimeError("Native smoke check failed")
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
@@ -53,7 +50,7 @@ def main() -> None:
     ).strip()
     sbom_created = datetime.fromisoformat(commit_time).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     manifest = {
-        "extension": "jev", "release": args.tag, "duckdb_version": duckdb.__version__,
+        "extension": "dc", "release": args.tag, "duckdb_version": duckdb.__version__,
         "platform": args.platform, "architecture": platform.machine(),
         "git_commit": commit,
         "sha256": digest, "signed": False,
@@ -63,7 +60,7 @@ def main() -> None:
     }
     output = ROOT / "dist"
     output.mkdir(exist_ok=True)
-    archive = output / f"jev-{args.tag}-duckdb-v{duckdb.__version__}-{args.platform}.tar.gz"
+    archive = output / f"dc-{args.tag}-duckdb-v{duckdb.__version__}-{args.platform}.tar.gz"
     with tempfile.TemporaryDirectory() as temporary:
         metadata = Path(temporary) / "manifest.json"
         metadata.write_text(json.dumps(manifest, indent=2) + "\n")
@@ -74,16 +71,16 @@ def main() -> None:
                     "spdxVersion": "SPDX-2.3",
                     "dataLicense": "CC0-1.0",
                     "SPDXID": "SPDXRef-DOCUMENT",
-                    "name": f"duckdb-jev-{args.tag}-{args.platform}",
+                    "name": f"duckdb-dual-cognition-{args.tag}-{args.platform}",
                     "documentNamespace": (
-                        f"https://github.com/prasanthj/duckdb-jev/releases/{args.tag}/"
+                        f"https://github.com/prasanthj/duckdb-dual-cognition/releases/{args.tag}/"
                         f"{args.platform}/{commit}"
                     ),
                     "creationInfo": {"created": sbom_created, "creators": ["Tool: scripts/package_release.py"]},
                     "packages": [
                         {
-                            "name": "duckdb-jev",
-                            "SPDXID": "SPDXRef-Package-duckdb-jev",
+                            "name": "duckdb-dual-cognition",
+                            "SPDXID": "SPDXRef-Package-duckdb-dual-cognition",
                             "versionInfo": args.tag.removeprefix("v"),
                             "downloadLocation": "NOASSERTION",
                             "filesAnalyzed": True,
@@ -122,11 +119,11 @@ def main() -> None:
                         {
                             "spdxElementId": "SPDXRef-DOCUMENT",
                             "relationshipType": "DESCRIBES",
-                            "relatedSpdxElement": "SPDXRef-Package-duckdb-jev",
+                            "relatedSpdxElement": "SPDXRef-Package-duckdb-dual-cognition",
                         },
                         *[
                             {
-                                "spdxElementId": "SPDXRef-Package-duckdb-jev",
+                                "spdxElementId": "SPDXRef-Package-duckdb-dual-cognition",
                                 "relationshipType": "DEPENDS_ON",
                                 "relatedSpdxElement": dependency,
                             }
@@ -143,7 +140,7 @@ def main() -> None:
             + "\n"
         )
         with tarfile.open(archive, "w:gz") as tar:
-            tar.add(binary, arcname="jev.duckdb_extension")
+            tar.add(binary, arcname="dc.duckdb_extension")
             tar.add(metadata, arcname="manifest.json")
             tar.add(sbom, arcname="SBOM.spdx.json")
             tar.add(ROOT / "README.md", arcname="README.md")

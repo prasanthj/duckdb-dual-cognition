@@ -39,7 +39,7 @@ static LogicalType BooleanType() { return LogicalType(LogicalTypeId::BOOLEAN); }
 static LogicalType BigintType() { return LogicalType(LogicalTypeId::BIGINT); }
 static LogicalType AnyType() { return LogicalType(LogicalTypeId::ANY); }
 static bool ContextInterrupted(ClientContext &ctx) {
-#ifdef JEV_DUCKDB_1_4
+#ifdef DC_DUCKDB_1_4
   return ctx.interrupted.load();
 #else
   return ctx.IsInterrupted();
@@ -68,6 +68,7 @@ struct MetricsCounters {
   std::atomic<uint64_t> max_latency_us{0};
 };
 static MetricsCounters metrics;
+static MetricsCounters system_two_metrics;
 
 static void AtomicMax(std::atomic<uint64_t> &target, uint64_t value) {
   auto current = target.load();
@@ -76,7 +77,7 @@ static void AtomicMax(std::atomic<uint64_t> &target, uint64_t value) {
 }
 
 static void Fail(const std::string &message) {
-  throw InvalidInputException("jev: " + message);
+  throw InvalidInputException("dc: " + message);
 }
 static Json Parse(const std::string &s) {
   try {
@@ -210,8 +211,11 @@ static string Trim(string s) {
        end = s.find_last_not_of(" \t\r\n");
   return begin == string::npos ? "" : s.substr(begin, end - begin + 1);
 }
-struct JevSecretOptions {
-  string key, endpoint, model;
+struct DcSecretOptions {
+  string system_one_provider, system_one_key, system_one_endpoint,
+      system_one_model;
+  string system_two_provider, system_two_key, system_two_endpoint,
+      system_two_model;
 };
 static void CopySecretOption(const string &name, const CreateSecretInput &input,
                              KeyValueSecret &secret) {
@@ -219,90 +223,107 @@ static void CopySecretOption(const string &name, const CreateSecretInput &input,
   if (value != input.options.end())
     secret.secret_map[name] = value->second;
 }
-static unique_ptr<BaseSecret> CreateJevSecret(ClientContext &,
-                                              CreateSecretInput &input) {
+static unique_ptr<BaseSecret> CreateDcSecret(ClientContext &,
+                                             CreateSecretInput &input) {
   auto secret = make_uniq<KeyValueSecret>(input.scope, input.type,
                                           input.provider, input.name);
-  CopySecretOption("api_key", input, *secret);
-  CopySecretOption("endpoint", input, *secret);
-  CopySecretOption("model", input, *secret);
-  secret->redact_keys.insert("api_key");
+  for (const string &name :
+       {"system_one_provider", "system_one_api_key", "system_one_endpoint",
+        "system_one_model", "system_two_provider", "system_two_api_key",
+        "system_two_endpoint", "system_two_model"})
+    CopySecretOption(name, input, *secret);
+  for (const string &required :
+       {"system_one_provider", "system_one_api_key", "system_one_model",
+        "system_two_provider", "system_two_api_key", "system_two_model"}) {
+    auto value = input.options.find(required);
+    if (value == input.options.end() || value->second.IsNull() ||
+        Trim(value->second.ToString()).empty())
+      Fail("CREATE SECRET TYPE dc requires " + required);
+  }
+  secret->redact_keys.insert("system_one_api_key");
+  secret->redact_keys.insert("system_two_api_key");
   return std::move(secret);
 }
-static void RegisterJevSecret(ExtensionLoader &loader) {
+static void RegisterDcSecret(ExtensionLoader &loader) {
   SecretType type;
-  type.name = "jev";
+  type.name = "dc";
   type.deserializer = KeyValueSecret::Deserialize<KeyValueSecret>;
   type.default_provider = "config";
   loader.RegisterSecretType(type);
-  CreateSecretFunction function{"jev", "config", CreateJevSecret};
-  function.named_parameters["api_key"] = VarcharType();
-  function.named_parameters["endpoint"] = VarcharType();
-  function.named_parameters["model"] = VarcharType();
+  CreateSecretFunction function{"dc", "config", CreateDcSecret};
+  for (const string &name :
+       {"system_one_provider", "system_one_api_key", "system_one_endpoint",
+        "system_one_model", "system_two_provider", "system_two_api_key",
+        "system_two_endpoint", "system_two_model"})
+    function.named_parameters[name] = VarcharType();
   loader.RegisterFunction(function);
 }
-static JevSecretOptions Secret(ClientContext &ctx) {
-  JevSecretOptions result;
+static DcSecretOptions Secret(ClientContext &ctx) {
+  DcSecretOptions result;
   auto &manager = SecretManager::Get(ctx);
   auto transaction = CatalogTransaction::GetSystemCatalogTransaction(ctx);
-  auto match = manager.LookupSecret(transaction, "jev", "jev");
+  auto match = manager.LookupSecret(transaction, "dc", "dc");
   if (!match.HasMatch())
     return result;
   const auto &secret = dynamic_cast<const KeyValueSecret &>(match.GetSecret());
   Value value;
-  if (secret.TryGetValue("api_key", value) && !value.IsNull())
-    result.key = value.ToString();
-  if (secret.TryGetValue("endpoint", value) && !value.IsNull())
-    result.endpoint = value.ToString();
-  if (secret.TryGetValue("model", value) && !value.IsNull())
-    result.model = value.ToString();
+  auto copy = [&](const string &name, string &target) {
+    if (secret.TryGetValue(name, value) && !value.IsNull())
+      target = value.ToString();
+  };
+  copy("system_one_provider", result.system_one_provider);
+  copy("system_one_api_key", result.system_one_key);
+  copy("system_one_endpoint", result.system_one_endpoint);
+  copy("system_one_model", result.system_one_model);
+  copy("system_two_provider", result.system_two_provider);
+  copy("system_two_api_key", result.system_two_key);
+  copy("system_two_endpoint", result.system_two_endpoint);
+  copy("system_two_model", result.system_two_model);
   return result;
-}
-static string EnvironmentKey() {
-  const auto env = std::getenv("TYPESAFE_API_KEY");
-  const string key = env ? Trim(env) : "";
-  return key;
 }
 static Options ReadOptions(ClientContext &ctx) {
   if (!Setting(ctx, "enable_external_access").GetValue<bool>())
     Fail("external access is disabled");
   Options o;
-  o.model = Setting(ctx, "jev_model").GetValue<string>();
-  o.endpoint = Setting(ctx, "jev_endpoint").GetValue<string>();
+  o.model = Setting(ctx, "dc_system_one_model").GetValue<string>();
+  o.endpoint = Setting(ctx, "dc_system_one_endpoint").GetValue<string>();
   const auto secret = Secret(ctx);
-  if (!secret.model.empty())
-    o.model = secret.model;
-  if (!secret.endpoint.empty())
-    o.endpoint = secret.endpoint;
-  auto q = Setting(ctx, "jev_batch_size").GetValue<int64_t>();
-  auto b = Setting(ctx, "jev_max_request_bytes").GetValue<int64_t>();
-  auto c = Setting(ctx, "jev_concurrency").GetValue<int64_t>();
-  auto t = Setting(ctx, "jev_timeout_ms").GetValue<int64_t>();
-  auto retries = Setting(ctx, "jev_max_retries").GetValue<int64_t>();
-  auto retry_base = Setting(ctx, "jev_retry_base_ms").GetValue<int64_t>();
-  auto retry_max = Setting(ctx, "jev_retry_max_delay_ms").GetValue<int64_t>();
+  if (!secret.system_one_model.empty())
+    o.model = secret.system_one_model;
+  if (!secret.system_one_endpoint.empty())
+    o.endpoint = secret.system_one_endpoint;
+  auto q = Setting(ctx, "dc_system_one_batch_size").GetValue<int64_t>();
+  auto b = Setting(ctx, "dc_system_one_max_request_bytes").GetValue<int64_t>();
+  auto c = Setting(ctx, "dc_system_one_concurrency").GetValue<int64_t>();
+  auto t = Setting(ctx, "dc_system_one_timeout_ms").GetValue<int64_t>();
+  auto retries = Setting(ctx, "dc_system_one_max_retries").GetValue<int64_t>();
+  auto retry_base =
+      Setting(ctx, "dc_system_one_retry_base_ms").GetValue<int64_t>();
+  auto retry_max =
+      Setting(ctx, "dc_system_one_retry_max_delay_ms").GetValue<int64_t>();
   auto max_questions =
-      Setting(ctx, "jev_max_questions_per_query").GetValue<int64_t>();
+      Setting(ctx, "dc_system_one_max_questions_per_query").GetValue<int64_t>();
   auto max_requests =
-      Setting(ctx, "jev_max_requests_per_query").GetValue<int64_t>();
+      Setting(ctx, "dc_system_one_max_requests_per_query").GetValue<int64_t>();
   if (q < 1 || q > 1000 || b < 256 || b > 1048576 || c < 1 || c > 10 || t < 1 ||
       t > 300000 || retries < 0 || retries > 5 || retry_base < 1 ||
       retry_base > 10000 || retry_max < retry_base || retry_max > 60000 ||
       max_questions < 1 || max_questions > 100000000 || max_requests < 1 ||
       max_requests > 10000000 || o.model.empty())
-    Fail("invalid Jev settings (batch 1-1000, bytes 256-1048576, concurrency "
+    Fail("invalid System One settings (batch 1-1000, bytes 256-1048576, "
+         "concurrency "
          "1-10, timeout 1-300000ms, retries 0-5, and positive query budgets)");
   if (o.endpoint.rfind("https://", 0) != 0 &&
       o.endpoint.rfind("http://127.0.0.1:", 0) != 0 &&
       o.endpoint.rfind("http://localhost:", 0) != 0)
     Fail("endpoint requires HTTPS (HTTP allowed only on loopback)");
-  auto cache = Setting(ctx, "jev_cache_bytes").GetValue<int64_t>();
+  auto cache = Setting(ctx, "dc_system_one_cache_bytes").GetValue<int64_t>();
   if (cache < 0 || cache > 64 * 1024 * 1024)
-    Fail("jev_cache_bytes must be between zero and 64MiB");
+    Fail("dc_system_one_cache_bytes must be between zero and 64MiB");
   const auto session_bytes =
-      Setting(ctx, "jev_session_cache_bytes").GetValue<int64_t>();
+      Setting(ctx, "dc_system_one_session_cache_bytes").GetValue<int64_t>();
   const auto session_ttl =
-      Setting(ctx, "jev_session_cache_ttl_ms").GetValue<int64_t>();
+      Setting(ctx, "dc_system_one_session_cache_ttl_ms").GetValue<int64_t>();
   if (session_bytes < 0 || session_bytes > 64 * 1024 * 1024 ||
       session_ttl < 1 || session_ttl > 86400000)
     Fail("invalid session cache settings (bytes 0-64MiB, TTL 1-86400000ms)");
@@ -318,10 +339,77 @@ static Options ReadOptions(ClientContext &ctx) {
   o.retry_max_delay_ms = retry_max;
   o.max_query_questions = max_questions;
   o.max_query_requests = max_requests;
-  o.key = secret.key.empty() ? EnvironmentKey() : Trim(secret.key);
+  if (secret.system_one_provider != "typesafe")
+    Fail("SYSTEM_ONE_PROVIDER must be typesafe");
+  o.key = Trim(secret.system_one_key);
   if (o.key.empty() || o.key.find_first_of("\r\n") != string::npos)
-    Fail("no valid Jev credential; run CREATE SECRET (TYPE jev, API_KEY '...') "
-         "or set TYPESAFE_API_KEY");
+    Fail("no valid System One credential; create a complete TYPE dc secret");
+  return o;
+}
+static Options ReadSystemTwoOptions(ClientContext &ctx) {
+  if (!Setting(ctx, "enable_external_access").GetValue<bool>())
+    Fail("external access is disabled");
+  const auto secret = Secret(ctx);
+  if (secret.system_two_provider != "openai")
+    Fail("SYSTEM_TWO_PROVIDER must be openai");
+  Options o;
+  o.model = secret.system_two_model;
+  o.endpoint = secret.system_two_endpoint.empty()
+                   ? Setting(ctx, "dc_system_two_endpoint").GetValue<string>()
+                   : secret.system_two_endpoint;
+  o.key = Trim(secret.system_two_key);
+  const auto questions =
+      Setting(ctx, "dc_system_two_batch_size").GetValue<int64_t>();
+  const auto bytes =
+      Setting(ctx, "dc_system_two_max_request_bytes").GetValue<int64_t>();
+  const auto concurrency =
+      Setting(ctx, "dc_system_two_concurrency").GetValue<int64_t>();
+  const auto timeout =
+      Setting(ctx, "dc_system_two_timeout_ms").GetValue<int64_t>();
+  const auto retries =
+      Setting(ctx, "dc_system_two_max_retries").GetValue<int64_t>();
+  const auto retry_base =
+      Setting(ctx, "dc_system_two_retry_base_ms").GetValue<int64_t>();
+  const auto retry_max =
+      Setting(ctx, "dc_system_two_retry_max_delay_ms").GetValue<int64_t>();
+  const auto cache_bytes =
+      Setting(ctx, "dc_system_two_cache_bytes").GetValue<int64_t>();
+  const auto session_bytes =
+      Setting(ctx, "dc_system_two_session_cache_bytes").GetValue<int64_t>();
+  const auto session_ttl =
+      Setting(ctx, "dc_system_two_session_cache_ttl_ms").GetValue<int64_t>();
+  const auto max_items =
+      Setting(ctx, "dc_system_two_max_items_per_query").GetValue<int64_t>();
+  const auto max_requests =
+      Setting(ctx, "dc_system_two_max_requests_per_query").GetValue<int64_t>();
+  if (o.model.empty() || o.key.empty() ||
+      o.key.find_first_of("\r\n") != string::npos)
+    Fail("no valid System Two credential; create a complete TYPE dc secret");
+  if (questions < 1 || questions > 500 || bytes < 1024 ||
+      bytes > 4 * 1024 * 1024 || concurrency < 1 || concurrency > 10 ||
+      timeout < 1 || timeout > 300000 || retries < 0 || retries > 5 ||
+      retry_base < 1 || retry_base > 10000 || retry_max < retry_base ||
+      retry_max > 60000 || cache_bytes < 0 || cache_bytes > 64 * 1024 * 1024 ||
+      session_bytes < 0 || session_bytes > 64 * 1024 * 1024 ||
+      session_ttl < 1 || session_ttl > 86400000 || max_items < 1 ||
+      max_items > 100000000 || max_requests < 1 || max_requests > 10000000)
+    Fail("invalid System Two settings");
+  if (o.endpoint.rfind("https://", 0) != 0 &&
+      o.endpoint.rfind("http://127.0.0.1:", 0) != 0 &&
+      o.endpoint.rfind("http://localhost:", 0) != 0)
+    Fail("System Two endpoint requires HTTPS (HTTP allowed only on loopback)");
+  o.questions = questions;
+  o.bytes = bytes;
+  o.concurrency = concurrency;
+  o.timeout = timeout;
+  o.retries = retries;
+  o.retry_base_ms = retry_base;
+  o.retry_max_delay_ms = retry_max;
+  o.cache_bytes = cache_bytes;
+  o.session_bytes = session_bytes;
+  o.session_ttl = session_ttl;
+  o.max_query_questions = max_items;
+  o.max_query_requests = max_requests;
   return o;
 }
 // QueryEnd clears the configuration/key snapshot and query results; the opt-in
@@ -389,13 +477,14 @@ class QueryState : public ClientContextState {
   }
 
 public:
-  Options Snapshot(ClientContext &ctx) {
+  Options Snapshot(ClientContext &ctx, bool system_two = false) {
     std::lock_guard<std::mutex> lock(mutex);
     if (!options) {
-      options = ReadOptions(ctx);
+      options = system_two ? ReadSystemTwoOptions(ctx) : ReadOptions(ctx);
       const auto scope = duckdb_mbedtls::MbedTlsWrapper::ComputeSha256Hash(
           Json::array(
-              {"jev-cache-v1", options->endpoint, options->model, options->key})
+              {system_two ? "dc-system-two-cache-v1" : "dc-system-one-cache-v1",
+               options->endpoint, options->model, options->key})
               .dump());
       if (scope != session_scope || session_budget != options->session_bytes ||
           session_ttl != options->session_ttl)
@@ -446,9 +535,9 @@ public:
   void Reserve(size_t questions, size_t requests, const Options &limits) {
     std::lock_guard<std::mutex> lock(mutex);
     if (questions > limits.max_query_questions - query_questions)
-      Fail("query exceeds jev_max_questions_per_query before request dispatch");
+      Fail("query exceeds configured item budget before request dispatch");
     if (requests > limits.max_query_requests - query_requests)
-      Fail("query exceeds jev_max_requests_per_query before request dispatch");
+      Fail("query exceeds configured request budget before request dispatch");
     query_questions += questions;
     query_requests += requests;
   }
@@ -471,7 +560,7 @@ public:
   void Abandon(const std::shared_ptr<Flight> &f) {
     if (!f->done) {
       f->promise.set_exception(std::make_exception_ptr(
-          InvalidInputException("jev: owning evaluation failed")));
+          InvalidInputException("dc: owning evaluation failed")));
       f->done = true;
       Release(f);
     }
@@ -623,7 +712,8 @@ static void RetryWait(ClientContext &ctx, std::atomic<bool> &stop,
 }
 static Json Request(CURL *curl, const string &payload, size_t question_count,
                     const Options &o, ClientContext &ctx,
-                    std::atomic<bool> &stop) {
+                    std::atomic<bool> &stop,
+                    MetricsCounters &counters = metrics) {
   Gate gate(ctx, stop, o.concurrency);
   Transfer transfer{"", &ctx, &stop, -1};
   curl_easy_reset(curl);
@@ -649,15 +739,15 @@ static Json Request(CURL *curl, const string &payload, size_t question_count,
   curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
   curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, Progress);
   curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &transfer);
-  metrics.requests++;
-  metrics.questions += question_count;
+  counters.requests++;
+  counters.questions += question_count;
   const auto started = std::chrono::steady_clock::now();
   const auto record_latency = [&]() {
     const auto latency = std::chrono::duration_cast<std::chrono::microseconds>(
                              std::chrono::steady_clock::now() - started)
                              .count();
-    metrics.total_latency_us += latency;
-    AtomicMax(metrics.max_latency_us, latency);
+    counters.total_latency_us += latency;
+    AtomicMax(counters.max_latency_us, latency);
   };
   CURLcode code = CURLE_OK;
   long status = 0;
@@ -665,14 +755,14 @@ static Json Request(CURL *curl, const string &payload, size_t question_count,
     transfer.body.clear();
     transfer.retry_after_ms = -1;
     status = 0;
-    metrics.request_bytes += payload.size();
+    counters.request_bytes += payload.size();
     code = curl_easy_perform(curl);
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-    metrics.response_bytes += transfer.body.size();
+    counters.response_bytes += transfer.body.size();
     if (code == CURLE_OK && status == 200)
       break;
     if (attempt >= o.retries || !Retryable(code, status)) {
-      metrics.errors++;
+      counters.errors++;
       record_latency();
       if (code != CURLE_OK)
         Fail("HTTP transport failed (code " + std::to_string(code) +
@@ -680,7 +770,7 @@ static Json Request(CURL *curl, const string &payload, size_t question_count,
       Fail("HTTP status " + std::to_string(status) + " after " +
            std::to_string(attempt + 1) + " attempt(s)");
     }
-    metrics.retries++;
+    counters.retries++;
     const auto exponential = std::min<int64_t>(
         o.retry_base_ms * (int64_t{1} << attempt), o.retry_max_delay_ms);
     const auto jitter_range = std::max<int64_t>(1, exponential / 4);
@@ -701,14 +791,14 @@ static Json Request(CURL *curl, const string &payload, size_t question_count,
       const auto &reported = response["usage"];
       if (reported.contains("input_tokens") &&
           reported["input_tokens"].is_number_unsigned())
-        metrics.input_tokens += reported["input_tokens"].get<uint64_t>();
+        counters.input_tokens += reported["input_tokens"].get<uint64_t>();
       if (reported.contains("output_tokens") &&
           reported["output_tokens"].is_number_unsigned())
-        metrics.output_tokens += reported["output_tokens"].get<uint64_t>();
+        counters.output_tokens += reported["output_tokens"].get<uint64_t>();
     }
     return response;
   } catch (...) {
-    metrics.errors++;
+    counters.errors++;
     Fail("provider returned invalid JSON");
   }
   return nullptr;
@@ -893,7 +983,8 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
   auto &ctx = state.GetContext();
   auto &expr = state.expr.Cast<BoundFunctionExpression>();
   string name = expr.function.name;
-  auto query = ctx.registered_state->GetOrCreate<QueryState>("jev_query_state");
+  auto query = ctx.registered_state->GetOrCreate<QueryState>(
+      "dc_system_one_query_state");
   struct Row {
     Json evidence, questions, answers;
     string model, key;
@@ -905,7 +996,6 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
   std::vector<int64_t> mapping(args.size(), -1);
   std::vector<bool> hit(args.size(), false);
   std::unordered_map<string, size_t> unique;
-  std::vector<double> thresholds(args.size(), 0.5);
   std::optional<Options> options;
   size_t chunk_bytes = 0;
   std::vector<UnifiedVectorFormat> formats(args.ColumnCount());
@@ -941,21 +1031,11 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
     Json evidence = document(0, r, false);
     if (!Description(evidence))
       Fail("state must be text, STRUCT, JSON object or array");
-    Json qs;
-    if (name == "jev_eval")
-      qs = document(1, r, true);
-    else {
-      Json q = {{"type", name == "jev" ? "noul" : name.substr(4)},
-                {"instructions", document(1, r, false)}};
-      if (name == "jev") {
-        auto t = args.GetValue(2, r).GetValue<double>();
-        if (!std::isfinite(t) || t < 0 || t > 1)
-          Fail("threshold must be between zero and one");
-        thresholds[r] = t;
-      } else if (args.ColumnCount() > 2)
-        q["criteria"] = document(2, r, true);
-      qs = {{"answer", q}};
-    }
+    Json q = {{"type", name.substr(string("system_one_").size())},
+              {"instructions", document(1, r, false)}};
+    if (args.ColumnCount() > 2)
+      q["criteria"] = document(2, r, true);
+    Json qs = {{"answer", q}};
     ValidateQuestions(qs);
     string key = Json::array({evidence, qs}).dump();
     if (key.size() > options->bytes)
@@ -1124,28 +1204,20 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
       continue;
     }
     auto &row = rows[mapping[r]];
-    if (name == "jev") {
-      result.SetValue(r, Value(row.answers["answer"]["noul"].get<double>() >=
-                               thresholds[r]));
-      continue;
-    }
     child_list_t<Value> values;
-    if (name == "jev_eval")
-      values.emplace_back("answers", JsonValue(row.answers));
+    auto &a = row.answers["answer"];
+    if (name == "system_one_noul")
+      values.emplace_back("noul", Value(a["noul"].get<double>()));
     else {
-      auto &a = row.answers["answer"];
-      if (name == "jev_noul")
-        values.emplace_back("noul", Value(a["noul"].get<double>()));
+      if (name == "system_one_choice")
+        values.emplace_back("choice", Value(a["choice"].get<string>()));
       else {
-        if (name == "jev_choice")
-          values.emplace_back("choice", Value(a["choice"].get<string>()));
-        else
-          values.emplace_back("score", Value(a["score"].get<double>()));
-        values.emplace_back("confidence", Value(a["confidence"].get<double>()));
-        values.emplace_back("probabilities", Probabilities(a["probabilities"]));
-        if (name == "jev_score")
-          values.emplace_back("legend", JsonValue(a["legend"]));
+        values.emplace_back("score", Value(a["score"].get<double>()));
       }
+      values.emplace_back("confidence", Value(a["confidence"].get<double>()));
+      values.emplace_back("probabilities", Probabilities(a["probabilities"]));
+      if (name == "system_one_score")
+        values.emplace_back("legend", JsonValue(a["legend"]));
     }
     values.emplace_back("model", Value(row.model));
     values.emplace_back("cache_hit", Value(hit[r]));
@@ -1154,27 +1226,25 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
   metrics.cache_hits += std::count(hit.begin(), hit.end(), true);
 }
 static LogicalType ReturnType(const string &name) {
-  if (name == "jev")
-    return BooleanType();
   child_list_t<LogicalType> fields;
-  if (name == "jev_eval")
-    fields.emplace_back("answers", LogicalType::JSON());
-  else if (name == "jev_noul")
+  if (name == "system_one_noul")
     fields.emplace_back("noul", DoubleType());
   else {
-    fields.emplace_back(name == "jev_choice" ? "choice" : "score",
-                        name == "jev_choice" ? VarcharType() : DoubleType());
+    fields.emplace_back(name == "system_one_choice" ? "choice" : "score",
+                        name == "system_one_choice" ? VarcharType()
+                                                    : DoubleType());
     fields.emplace_back("confidence", DoubleType());
     fields.emplace_back("probabilities",
                         LogicalType::MAP(VarcharType(), DoubleType()));
-    if (name == "jev_score")
+    if (name == "system_one_score")
       fields.emplace_back("legend", LogicalType::JSON());
   }
   fields.emplace_back("model", VarcharType());
   fields.emplace_back("cache_hit", BooleanType());
   return LogicalType::STRUCT(fields);
 }
-#include "jev_stream.hpp"
+#include "system_one_stream.hpp"
+#include "system_two.hpp"
 
 struct StatsState : public GlobalTableFunctionState {
   bool emitted = false;
@@ -1183,11 +1253,12 @@ static unique_ptr<FunctionData> StatsBind(ClientContext &,
                                           TableFunctionBindInput &,
                                           vector<LogicalType> &types,
                                           vector<string> &names) {
-  names = {"requests",         "questions",     "cache_hits",
-           "retries",          "errors",        "input_tokens",
-           "output_tokens",    "request_bytes", "response_bytes",
-           "total_latency_ms", "max_latency_ms"};
-  types.assign(9, LogicalType::UBIGINT);
+  names = {"system",         "requests",         "items",
+           "cache_hits",     "retries",          "errors",
+           "input_tokens",   "output_tokens",    "request_bytes",
+           "response_bytes", "total_latency_ms", "max_latency_ms"};
+  types.push_back(VarcharType());
+  types.insert(types.end(), 9, LogicalType::UBIGINT);
   types.push_back(DoubleType());
   types.push_back(DoubleType());
   return nullptr;
@@ -1202,34 +1273,47 @@ static void StatsScan(ClientContext &, TableFunctionInput &input,
   if (state.emitted)
     return;
   state.emitted = true;
-  const uint64_t counters[] = {
-      metrics.requests.load(),      metrics.questions.load(),
-      metrics.cache_hits.load(),    metrics.retries.load(),
-      metrics.errors.load(),        metrics.input_tokens.load(),
-      metrics.output_tokens.load(), metrics.request_bytes.load(),
-      metrics.response_bytes.load()};
-  for (idx_t i = 0; i < 9; i++)
-    output.SetValue(i, 0, Value::UBIGINT(counters[i]));
-  output.SetValue(
-      9, 0, Value(static_cast<double>(metrics.total_latency_us.load()) / 1000.0));
-  output.SetValue(
-      10, 0, Value(static_cast<double>(metrics.max_latency_us.load()) / 1000.0));
-  output.SetCardinality(1);
+  MetricsCounters *sources[] = {&metrics, &system_two_metrics};
+  const char *systems[] = {"system_one", "system_two"};
+  for (idx_t row = 0; row < 2; row++) {
+    auto &source = *sources[row];
+    output.SetValue(0, row, Value(systems[row]));
+    const uint64_t counters[] = {
+        source.requests.load(),      source.questions.load(),
+        source.cache_hits.load(),    source.retries.load(),
+        source.errors.load(),        source.input_tokens.load(),
+        source.output_tokens.load(), source.request_bytes.load(),
+        source.response_bytes.load()};
+    for (idx_t i = 0; i < 9; i++)
+      output.SetValue(i + 1, row, Value::UBIGINT(counters[i]));
+    output.SetValue(
+        10, row,
+        Value(static_cast<double>(source.total_latency_us.load()) / 1000.0));
+    output.SetValue(
+        11, row,
+        Value(static_cast<double>(source.max_latency_us.load()) / 1000.0));
+  }
+  output.SetCardinality(2);
 }
 static void RegisterStats(ExtensionLoader &loader) {
-  TableFunction function("jev_stats", {}, StatsScan, StatsBind, StatsInit);
+  TableFunction function("dc_stats", {}, StatsScan, StatsBind, StatsInit);
   loader.RegisterFunction(function);
 }
 
 static void Load(ExtensionLoader &loader) {
-  RegisterJevSecret(loader);
+  RegisterDcSecret(loader);
   RegisterStream(loader);
+  RegisterSystemTwo(loader);
   RegisterStats(loader);
   ScalarFunction clear(
-      "jev_cache_clear", {}, BooleanType(),
+      "dc_cache_clear", {}, BooleanType(),
       [](DataChunk &args, ExpressionState &state, Vector &result) {
         auto cached = state.GetContext().registered_state->Get<QueryState>(
-            "jev_query_state");
+            "dc_system_one_query_state");
+        if (cached)
+          cached->ClearSession();
+        cached = state.GetContext().registered_state->Get<QueryState>(
+            "dc_system_two_query_state");
         if (cached)
           cached->ClearSession();
         for (idx_t r = 0; r < args.size(); r++)
@@ -1238,59 +1322,98 @@ static void Load(ExtensionLoader &loader) {
   clear.stability = FunctionStability::VOLATILE;
   loader.RegisterFunction(clear);
   auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
-  config.AddExtensionOption("jev_session_cache_bytes",
+  config.AddExtensionOption("dc_system_one_session_cache_bytes",
                             "Opt-in connection LRU serialized byte budget",
                             BigintType(), Value::BIGINT(0));
-  config.AddExtensionOption("jev_session_cache_ttl_ms",
+  config.AddExtensionOption("dc_system_one_session_cache_ttl_ms",
                             "Connection cache non-sliding TTL", BigintType(),
                             Value::BIGINT(60000));
-  config.AddExtensionOption("jev_cache_bytes",
+  config.AddExtensionOption("dc_system_one_cache_bytes",
                             "Query cache serialized byte budget (0 disables)",
                             BigintType(), Value::BIGINT(8 * 1024 * 1024));
-  config.AddExtensionOption("jev_model", "TypeSafe model", VarcharType(),
-                            Value("jev-latest"));
-  config.AddExtensionOption("jev_endpoint", "Trusted TypeSafe endpoint",
-                            VarcharType(),
+  config.AddExtensionOption("dc_system_one_model", "TypeSafe model",
+                            VarcharType(), Value("jev-latest"));
+  config.AddExtensionOption("dc_system_one_endpoint",
+                            "Trusted TypeSafe endpoint", VarcharType(),
                             Value("https://api.typesafe.ai/v1/systemone"));
-  config.AddExtensionOption("jev_batch_size",
+  config.AddExtensionOption("dc_system_one_batch_size",
                             "Maximum questions per HTTP request", BigintType(),
                             Value::BIGINT(25));
-  config.AddExtensionOption("jev_max_request_bytes",
+  config.AddExtensionOption("dc_system_one_max_request_bytes",
                             "Serialized request byte cap", BigintType(),
                             Value::BIGINT(65536));
-  config.AddExtensionOption("jev_concurrency",
+  config.AddExtensionOption("dc_system_one_concurrency",
                             "Concurrent requests (global ceiling 10)",
                             BigintType(), Value::BIGINT(10));
-  config.AddExtensionOption("jev_timeout_ms", "HTTP timeout per attempt",
-                            BigintType(), Value::BIGINT(30000));
+  config.AddExtensionOption("dc_system_one_timeout_ms",
+                            "HTTP timeout per attempt", BigintType(),
+                            Value::BIGINT(30000));
   config.AddExtensionOption(
-      "jev_max_retries", "Retries for transient transport, 429 and 5xx errors",
-      BigintType(), Value::BIGINT(2));
-  config.AddExtensionOption("jev_retry_base_ms",
+      "dc_system_one_max_retries",
+      "Retries for transient transport, 429 and 5xx errors", BigintType(),
+      Value::BIGINT(2));
+  config.AddExtensionOption("dc_system_one_retry_base_ms",
                             "Initial exponential retry delay", BigintType(),
                             Value::BIGINT(100));
-  config.AddExtensionOption("jev_retry_max_delay_ms",
+  config.AddExtensionOption("dc_system_one_retry_max_delay_ms",
                             "Maximum retry delay including Retry-After",
                             BigintType(), Value::BIGINT(5000));
   config.AddExtensionOption(
-      "jev_max_questions_per_query",
+      "dc_system_one_max_questions_per_query",
       "Maximum billable questions dispatched by one query", BigintType(),
       Value::BIGINT(100000));
   config.AddExtensionOption(
-      "jev_max_requests_per_query",
+      "dc_system_one_max_requests_per_query",
       "Maximum logical HTTP requests dispatched by one query", BigintType(),
       Value::BIGINT(2000));
+  config.AddExtensionOption("dc_system_two_endpoint",
+                            "OpenAI Responses endpoint", VarcharType(),
+                            Value("https://api.openai.com/v1/responses"));
+  config.AddExtensionOption("dc_system_two_batch_size",
+                            "Maximum rows per Responses request", BigintType(),
+                            Value::BIGINT(25));
+  config.AddExtensionOption("dc_system_two_max_request_bytes",
+                            "Serialized Responses request byte cap",
+                            BigintType(), Value::BIGINT(1048576));
+  config.AddExtensionOption("dc_system_two_concurrency",
+                            "Concurrent Responses requests", BigintType(),
+                            Value::BIGINT(5));
+  config.AddExtensionOption("dc_system_two_timeout_ms",
+                            "HTTP timeout per attempt", BigintType(),
+                            Value::BIGINT(90000));
+  config.AddExtensionOption(
+      "dc_system_two_max_retries",
+      "Retries for transient transport, 429 and 5xx errors", BigintType(),
+      Value::BIGINT(2));
+  config.AddExtensionOption("dc_system_two_retry_base_ms",
+                            "Initial exponential retry delay", BigintType(),
+                            Value::BIGINT(250));
+  config.AddExtensionOption("dc_system_two_retry_max_delay_ms",
+                            "Maximum retry delay including Retry-After",
+                            BigintType(), Value::BIGINT(10000));
+  config.AddExtensionOption("dc_system_two_cache_bytes",
+                            "System Two query-cache serialized byte budget",
+                            BigintType(), Value::BIGINT(8 * 1024 * 1024));
+  config.AddExtensionOption(
+      "dc_system_two_session_cache_bytes",
+      "System Two connection-cache serialized byte budget", BigintType(),
+      Value::BIGINT(0));
+  config.AddExtensionOption("dc_system_two_session_cache_ttl_ms",
+                            "System Two connection-cache TTL", BigintType(),
+                            Value::BIGINT(60000));
+  config.AddExtensionOption("dc_system_two_max_items_per_query",
+                            "Maximum uncached System Two rows per query",
+                            BigintType(), Value::BIGINT(100000));
+  config.AddExtensionOption("dc_system_two_max_requests_per_query",
+                            "Maximum System Two HTTP requests per query",
+                            BigintType(), Value::BIGINT(2000));
   for (string name :
-       {"jev", "jev_noul", "jev_choice", "jev_score", "jev_eval"}) {
+       {"system_one_noul", "system_one_choice", "system_one_score"}) {
     ScalarFunctionSet set(name);
     for (int argc : {2, 3}) {
-      if (argc == 2 && name != "jev_noul" && name != "jev_eval")
-        continue;
-      if (argc == 3 && name == "jev_eval")
+      if (argc == 2 && name != "system_one_noul")
         continue;
       vector<LogicalType> args(argc, AnyType());
-      if (name == "jev")
-        args[2] = DoubleType();
       ScalarFunction fn(name, args, ReturnType(name), Evaluate);
       fn.stability = FunctionStability::VOLATILE;
       fn.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
@@ -1301,5 +1424,5 @@ static void Load(ExtensionLoader &loader) {
 }
 } // namespace duckdb
 extern "C" {
-DUCKDB_CPP_EXTENSION_ENTRY(jev, loader) { duckdb::Load(loader); }
+DUCKDB_CPP_EXTENSION_ENTRY(dc, loader) { duckdb::Load(loader); }
 }

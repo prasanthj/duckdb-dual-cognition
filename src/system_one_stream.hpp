@@ -33,7 +33,8 @@ struct StreamState : LocalTableFunctionState {
   std::exception_ptr error;
 
   explicit StreamState(ClientContext &context) : ctx(context) {
-    query = ctx.registered_state->GetOrCreate<QueryState>("jev_query_state");
+    query = ctx.registered_state->GetOrCreate<QueryState>(
+        "dc_system_one_query_state");
   }
   ~StreamState() override {
     stopped.store(true);
@@ -264,8 +265,8 @@ static unique_ptr<FunctionData> StreamBind(ClientContext &,
                                            vector<LogicalType> &types,
                                            vector<string> &names) {
   if (input.input_table_types.size() != 3)
-    throw BinderException(
-        "jev_stream expects TABLE columns (row_id, evidence, questions)");
+    throw BinderException("system_one_stream expects TABLE columns (row_id, "
+                          "evidence, questions)");
   types = {input.input_table_types[0], LogicalType::JSON(), VarcharType(),
            BooleanType()};
   names = {"row_id", "answers", "model", "cache_hit"};
@@ -305,7 +306,7 @@ StreamFinal(ExecutionContext &, TableFunctionInput &data, DataChunk &output) {
                             : OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
 }
 static void RegisterStream(ExtensionLoader &loader) {
-  TableFunction function("jev_stream", {LogicalType::TABLE}, nullptr,
+  TableFunction function("system_one_stream", {LogicalType::TABLE}, nullptr,
                          StreamBind, StreamGlobal, StreamLocal);
   function.in_out_function = StreamInput;
   function.in_out_function_final = StreamFinal;

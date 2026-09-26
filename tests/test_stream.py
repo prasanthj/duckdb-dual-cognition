@@ -13,15 +13,15 @@ QUESTIONS = json.dumps({"p": {"type": "noul", "instructions": "p"}})
 
 def stream_sql(count: int, evidence: str = "{'i':i}") -> str:
     return (
-        f"SELECT * FROM jev_stream((SELECT i, {evidence}, '{QUESTIONS}'::JSON "
+        f"SELECT * FROM system_one_stream((SELECT i, {evidence}, '{QUESTIONS}'::JSON "
         f"FROM range({count}) t(i)))"
     )
 
 
 @pytest.mark.parametrize("count", [0, 1, 2047, 2048, 2049, 4097, 10001])
 def test_cross_chunk_packing(db: duckdb.DuckDBPyConnection, stub: Stub, count: int) -> None:
-    db.execute("SET jev_batch_size=1000")
-    db.execute("SET jev_max_request_bytes=1048576")
+    db.execute("SET dc_system_one_batch_size=1000")
+    db.execute("SET dc_system_one_max_request_bytes=1048576")
     rows = db.execute(stream_sql(count)).fetchall()
     assert len(rows) == count
     assert [(row[0], json.loads(row[1])["p"]["noul"]) for row in rows] == [
@@ -36,7 +36,7 @@ def test_cross_chunk_packing(db: duckdb.DuckDBPyConnection, stub: Stub, count: i
 def test_empty_explain_and_null_never_call(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
     db.execute("EXPLAIN " + stream_sql(10)).fetchall()
     rows = db.execute(
-        "SELECT * FROM jev_stream((SELECT NULL::INTEGER id, NULL::VARCHAR evidence, 'invalid' q FROM range(9000)))"
+        "SELECT * FROM system_one_stream((SELECT NULL::INTEGER id, NULL::VARCHAR evidence, 'invalid' q FROM range(9000)))"
     ).fetchall()
     assert rows == [(None, None, None, None)] * 9000
     assert not stub.calls
@@ -51,10 +51,10 @@ def test_duplicates_coalesce_before_first_response(db: duckdb.DuckDBPyConnection
 
 
 def test_mult_question_rows_span_packs(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
-    db.execute("SET jev_batch_size=1")
+    db.execute("SET dc_system_one_batch_size=1")
     qs = {"a": {"type": "noul", "instructions": "a"}, "b": {"type": "noul", "instructions": "b"}}
     rows = db.execute(
-        "SELECT * FROM jev_stream((SELECT i, {'i':i}, ?::JSON FROM range(5) t(i)))", [json.dumps(qs)]
+        "SELECT * FROM system_one_stream((SELECT i, {'i':i}, ?::JSON FROM range(5) t(i)))", [json.dumps(qs)]
     ).fetchall()
     assert len(rows) == 5
     assert all(json.loads(r[1])["a"]["noul"] == json.loads(r[1])["b"]["noul"] == r[0] / 10 for r in rows)
@@ -64,9 +64,9 @@ def test_mult_question_rows_span_packs(db: duckdb.DuckDBPyConnection, stub: Stub
 @pytest.mark.parametrize("concurrency", [1, 4])
 def test_pipeline_request_overlap(db: duckdb.DuckDBPyConnection, stub: Stub, concurrency: int) -> None:
     stub.delay = 0.03
-    db.execute("SET jev_batch_size=1000")
-    db.execute("SET jev_max_request_bytes=1048576")
-    db.execute(f"SET jev_concurrency={concurrency}")
+    db.execute("SET dc_system_one_batch_size=1000")
+    db.execute("SET dc_system_one_max_request_bytes=1048576")
+    db.execute(f"SET dc_system_one_concurrency={concurrency}")
     assert len(db.execute(stream_sql(9000)).fetchall()) == 9000
     if concurrency == 1:
         assert stub.peak == 1
@@ -78,8 +78,8 @@ def test_pipeline_request_overlap(db: duckdb.DuckDBPyConnection, stub: Stub, con
 
 def test_limit_stops_and_next_query_works(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
     stub.delay = 0.01
-    db.execute("SET jev_batch_size=1000")
-    db.execute("SET jev_max_request_bytes=1048576")
+    db.execute("SET dc_system_one_batch_size=1000")
+    db.execute("SET dc_system_one_max_request_bytes=1048576")
     rows = db.execute(stream_sql(100000) + " LIMIT 1").fetchall()
     assert len(rows) == 1
     sent = sum(len(c["body"]["questions"]) for c in stub.calls)
@@ -118,7 +118,7 @@ def test_interrupt_cleanup(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
 
 def test_buffered_answer_budget(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
     stub.mode = "large_answers"
-    db.execute("SET jev_batch_size=1")
+    db.execute("SET dc_system_one_batch_size=1")
     with pytest.raises(duckdb.InvalidInputException, match="stream buffered answers exceed"):
         db.execute(stream_sql(50)).fetchall()
     stub.mode = "normal"
@@ -126,7 +126,7 @@ def test_buffered_answer_budget(db: duckdb.DuckDBPyConnection, stub: Stub) -> No
 
 
 def test_byte_splits_preserve_rows(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
-    db.execute("SET jev_max_request_bytes=600")
+    db.execute("SET dc_system_one_max_request_bytes=600")
     rows = db.execute(stream_sql(200)).fetchall()
     assert len(rows) == 200
     assert all(c["bytes"] <= 600 for c in stub.calls)
@@ -135,11 +135,11 @@ def test_byte_splits_preserve_rows(db: duckdb.DuckDBPyConnection, stub: Stub) ->
 
 def test_invalid_table_shape(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
     with pytest.raises(duckdb.BinderException, match="columns"):
-        db.execute("SELECT * FROM jev_stream((SELECT 1))").fetchall()
+        db.execute("SELECT * FROM system_one_stream((SELECT 1))").fetchall()
     assert not stub.calls
 
 
-@pytest.mark.parametrize("sql", ["SELECT jev_noul('x','p')", stream_sql(1)])
+@pytest.mark.parametrize("sql", ["SELECT system_one_noul('x','p')", stream_sql(1)])
 def test_provider_model_bound(db: duckdb.DuckDBPyConnection, stub: Stub, sql: str) -> None:
     stub.mode = "large_model"
     with pytest.raises(duckdb.InvalidInputException, match="invalid provider response"):

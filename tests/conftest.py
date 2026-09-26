@@ -1,6 +1,7 @@
 """Deterministic HTTP/1.1 service; never invokes paid inference."""
 
 import json
+import os
 import socket
 import threading
 import time
@@ -12,7 +13,11 @@ from typing import Any
 import duckdb
 import pytest
 
-EXTENSION = Path(__file__).resolve().parents[1] / "build/extension/jev/jev.duckdb_extension"
+ROOT = Path(__file__).resolve().parents[1]
+BUILD_DIR = Path(os.environ.get("DC_BUILD_DIR", ROOT / "build"))
+if not BUILD_DIR.exists() and (ROOT / "build-dc").exists():
+    BUILD_DIR = ROOT / "build-dc"
+EXTENSION = BUILD_DIR / "extension/dc/dc.duckdb_extension"
 
 
 class TestHTTPServer(ThreadingHTTPServer):
@@ -61,6 +66,7 @@ class Stub:
                             "body": data,
                             "bytes": len(body),
                             "authorization": self.headers.get("Authorization"),
+                            "path": self.path,
                             "status": status,
                         }
                     )
@@ -70,46 +76,69 @@ class Stub:
                 processing = True
                 try:
                     time.sleep(owner.delay)
-                    answers = {}
-                    for key, question in reversed(list(data["questions"].items())):
-                        evidence = question["instructions"]["evidence"]
-                        number = evidence.get("i", 9) if isinstance(evidence, dict) else 9
-                        kind = question["type"]
-                        if kind == "noul":
-                            answer = {"type": kind, "noul": (int(number) % 10) / 10}
-                        elif kind == "choice":
-                            options = list(question["criteria"])
-                            chosen = options[int(number) % len(options)]
-                            answer = {
-                                "type": kind,
-                                "choice": chosen,
-                                "confidence": 1.0,
-                                "probabilities": {x: float(x == chosen) for x in options},
-                            }
-                        else:
-                            criteria = question["criteria"]
-                            answer = {
-                                "type": kind,
-                                "score": 0.5,
-                                "confidence": 0.5,
-                                "legend": {str(i): item for i, item in enumerate(criteria)},
-                                "probabilities": {str(i): 0.5 if i < 2 else 0.0 for i in range(len(criteria))},
-                            }
-                        if owner.mode == "distinct_confidence" and kind != "noul":
-                            answer["confidence"] = 0.73
-                        if owner.mode == "large_answers":
-                            answer["extra"] = "x" * (1024 * 1024)
-                        answers[key] = answer
-                    if owner.mode == "missing":
-                        answers.pop(next(iter(answers)))
-                    if owner.mode == "range":
-                        next(iter(answers.values()))["noul"] = 1.5
-                    result = {
-                        "model": "x" * 1025 if owner.mode == "large_model" else "jev-stub-pinned",
-                        "answers": answers,
-                        "usage": {"input_tokens": 10, "output_tokens": 5},
-                    }
-                    response = json.dumps(result).encode() if owner.mode != "malformed" else b"not-json"
+                    if self.path.endswith("/v1/responses"):
+                        user_text = data["input"][1]["content"][0]["text"]
+                        items = json.loads(user_text)["items"]
+                        results = []
+                        for item in items:
+                            evidence = item["evidence"]
+                            instruction = item["instruction"]
+                            if "schema" in item:
+                                schema = item["schema"]
+                                fields = schema if isinstance(schema, list) else schema.get("required", list(schema))
+                                value = json.dumps({field: f"{field}:{evidence}" for field in fields})
+                            else:
+                                value = f"{instruction} | {evidence}"
+                            results.append({"id": item["id"], "value": value})
+                        result = {
+                            "model": "gpt-5.6-luna-stub",
+                            "output": [{"content": [{"type": "output_text", "text": json.dumps({"results": results})}]}],
+                            "usage": {"input_tokens": 12, "output_tokens": 7},
+                        }
+                        if owner.mode == "missing":
+                            result["output"][0]["content"][0]["text"] = json.dumps({"results": results[:-1]})
+                        response = json.dumps(result).encode() if owner.mode != "malformed" else b"not-json"
+                    else:
+                        answers = {}
+                        for key, question in reversed(list(data["questions"].items())):
+                            evidence = question["instructions"]["evidence"]
+                            number = evidence.get("i", 9) if isinstance(evidence, dict) else 9
+                            kind = question["type"]
+                            if kind == "noul":
+                                answer = {"type": kind, "noul": (int(number) % 10) / 10}
+                            elif kind == "choice":
+                                options = list(question["criteria"])
+                                chosen = options[int(number) % len(options)]
+                                answer = {
+                                    "type": kind,
+                                    "choice": chosen,
+                                    "confidence": 1.0,
+                                    "probabilities": {x: float(x == chosen) for x in options},
+                                }
+                            else:
+                                criteria = question["criteria"]
+                                answer = {
+                                    "type": kind,
+                                    "score": 0.5,
+                                    "confidence": 0.5,
+                                    "legend": {str(i): item for i, item in enumerate(criteria)},
+                                    "probabilities": {str(i): 0.5 if i < 2 else 0.0 for i in range(len(criteria))},
+                                }
+                            if owner.mode == "distinct_confidence" and kind != "noul":
+                                answer["confidence"] = 0.73
+                            if owner.mode == "large_answers":
+                                answer["extra"] = "x" * (1024 * 1024)
+                            answers[key] = answer
+                        if owner.mode == "missing":
+                            answers.pop(next(iter(answers)))
+                        if owner.mode == "range":
+                            next(iter(answers.values()))["noul"] = 1.5
+                        result = {
+                            "model": "x" * 1025 if owner.mode == "large_model" else "jev-stub-pinned",
+                            "answers": answers,
+                            "usage": {"input_tokens": 10, "output_tokens": 5},
+                        }
+                        response = json.dumps(result).encode() if owner.mode != "malformed" else b"not-json"
                     # Count overlapping request processing, not the server's
                     # response-write epilogue. A client can begin its next
                     # request as soon as it has read this response, before the
@@ -139,6 +168,10 @@ class Stub:
     def endpoint(self) -> str:
         return f"http://127.0.0.1:{self.server.server_port}/v1/systemone"
 
+    @property
+    def responses_endpoint(self) -> str:
+        return f"http://127.0.0.1:{self.server.server_port}/v1/responses"
+
     def close(self) -> None:
         self.server.shutdown()
         self.server.server_close()
@@ -146,8 +179,7 @@ class Stub:
 
 
 @pytest.fixture
-def stub(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stub]:
-    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key-never-real")
+def stub() -> Iterator[Stub]:
     instance = Stub()
     yield instance
     instance.close()
@@ -156,7 +188,15 @@ def stub(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stub]:
 def connect(stub: Stub) -> duckdb.DuckDBPyConnection:
     con = duckdb.connect(config={"allow_unsigned_extensions": True, "threads": 4})
     con.execute(f"LOAD '{EXTENSION}'")
-    con.execute("SET jev_endpoint = ?", [stub.endpoint])
+    con.execute(
+        """CREATE TEMPORARY SECRET dc_test (
+        TYPE dc,
+        SYSTEM_ONE_PROVIDER 'typesafe', SYSTEM_ONE_API_KEY 'test-system-one',
+        SYSTEM_ONE_ENDPOINT ?, SYSTEM_ONE_MODEL 'jev-stub',
+        SYSTEM_TWO_PROVIDER 'openai', SYSTEM_TWO_API_KEY 'test-system-two',
+        SYSTEM_TWO_ENDPOINT ?, SYSTEM_TWO_MODEL 'gpt-5.6-luna-stub')""",
+        [stub.endpoint, stub.responses_endpoint],
+    )
     return con
 
 

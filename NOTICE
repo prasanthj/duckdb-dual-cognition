@@ -1,6 +1,5 @@
-duckdb-jev
+duckdb-dual-cognition
 Copyright 2026 Prasanth Jayachandran
 
-This product includes DuckDB, licensed under the MIT License, and nlohmann/json,
-licensed under the MIT License. Their license texts are included with binary
-release archives.
+This product includes software developed by the DuckDB Foundation and
+third-party components documented in release SBOMs and accompanying licenses.
