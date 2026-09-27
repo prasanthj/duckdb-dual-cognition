@@ -189,6 +189,7 @@ static void EvaluateSystemTwo(DataChunk &args, ExpressionState &state,
   vector<Pack> packs;
   Pack current;
   size_t current_bytes = 0;
+  size_t uncached_items = 0;
   for (size_t i = 0; i < rows.size(); i++) {
     if (rows[i].cached)
       continue;
@@ -208,10 +209,11 @@ static void EvaluateSystemTwo(DataChunk &args, ExpressionState &state,
     current.rows.push_back(i);
     current.items.push_back(std::move(item));
     current_bytes += item_bytes;
+    uncached_items++;
   }
   if (!current.items.empty())
     packs.push_back(std::move(current));
-  query->Reserve(rows.size(), packs.size(), o);
+  query->Reserve(uncached_items, packs.size(), o);
   std::atomic<bool> stopped{false};
   std::mutex results_mutex;
   std::exception_ptr error;

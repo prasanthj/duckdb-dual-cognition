@@ -1,4 +1,6 @@
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import duckdb
 import pytest
@@ -58,6 +60,25 @@ def test_duplicate_rows_coalesce_and_connection_cache_is_explicit(
     assert len(stub.calls) == 2
 
 
+def test_warm_cache_hits_do_not_consume_uncached_item_budget(
+    db: duckdb.DuckDBPyConnection, stub: Stub
+) -> None:
+    db.execute("SET dc_system_two_session_cache_bytes=1048576")
+    sql = "SELECT system_two_generate({'row':i}, 'reply') FROM range(4) t(i)"
+
+    first = db.execute(sql).fetchall()
+    assert len(first) == 4
+    assert not any(row[0]["cache_hit"] for row in first)
+    calls_after_fill = len(stub.calls)
+
+    db.execute("SET dc_system_two_max_items_per_query=1")
+    replay = db.execute(sql).fetchall()
+
+    assert len(replay) == 4
+    assert all(row[0]["cache_hit"] for row in replay)
+    assert len(stub.calls) == calls_after_fill
+
+
 @pytest.mark.parametrize("mode", ["missing", "malformed"])
 def test_invalid_provider_response_never_becomes_data(
     db: duckdb.DuckDBPyConnection, stub: Stub, mode: str
@@ -84,6 +105,26 @@ def test_retry_and_metrics(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
     ).fetchone()
     assert before is not None and after is not None
     assert tuple(after[i] - before[i] for i in range(3)) == (1, 2, 0)
+
+
+def test_interrupt_stops_system_two_and_connection_recovers(
+    db: duckdb.DuckDBPyConnection, stub: Stub
+) -> None:
+    stub.delay = 0.5
+    sql = "SELECT system_two_generate({'row':i}, 'reply') FROM range(100) t(i)"
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        task = pool.submit(lambda: db.execute(sql).fetchall())
+        deadline = time.monotonic() + 10
+        while not stub.calls and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert stub.calls
+        db.interrupt()
+        with pytest.raises(duckdb.Error):
+            task.result(timeout=10)
+
+    stub.delay = 0
+    row = db.execute("SELECT (system_two_generate('ready', 'reply')).value").fetchone()
+    assert row == ("reply | ready",)
 
 
 def test_nulls_and_invalid_schema_do_not_dispatch(

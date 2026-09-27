@@ -3,9 +3,13 @@ project(dc)
 set(CMAKE_CXX_STANDARD 17)
 find_package(CURL REQUIRED)
 include_directories(src/include)
-build_loadable_extension(dc "" src/dc_extension.cpp)
+set(DC_EXTENSION_SOURCES src/dc_extension.cpp)
+build_static_extension(dc ${DC_EXTENSION_SOURCES})
+build_loadable_extension(dc "" ${DC_EXTENSION_SOURCES})
+target_link_libraries(dc_extension CURL::libcurl)
 target_link_libraries(dc_loadable_extension CURL::libcurl)
 if(DC_DUCKDB_1_4)
+  target_compile_definitions(dc_extension PRIVATE DC_DUCKDB_1_4=1)
   target_compile_definitions(dc_loadable_extension
                              PRIVATE DC_DUCKDB_1_4=1)
 endif()
@@ -30,3 +34,9 @@ if(DC_PREBUILT_DUCKDB_STATIC_DIR)
                         -Wl,--exclude-libs,ALL)
   endif()
 endif()
+
+install(
+  TARGETS dc_extension
+  EXPORT "${DUCKDB_EXPORT_SET}"
+  LIBRARY DESTINATION "${INSTALL_LIB_DIR}"
+  ARCHIVE DESTINATION "${INSTALL_LIB_DIR}")

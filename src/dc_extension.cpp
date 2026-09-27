@@ -1,4 +1,5 @@
 #define DUCKDB_EXTENSION_MAIN
+#include "dc_extension.hpp"
 #include "duckdb.hpp"
 #include "duckdb/catalog/catalog_transaction.hpp"
 #include "duckdb/execution/expression_executor_state.hpp"
@@ -1300,7 +1301,7 @@ static void RegisterStats(ExtensionLoader &loader) {
   loader.RegisterFunction(function);
 }
 
-static void Load(ExtensionLoader &loader) {
+static void LoadInternal(ExtensionLoader &loader) {
   RegisterDcSecret(loader);
   RegisterStream(loader);
   RegisterSystemTwo(loader);
@@ -1422,7 +1423,19 @@ static void Load(ExtensionLoader &loader) {
     loader.RegisterFunction(set);
   }
 }
+
+void DcExtension::Load(ExtensionLoader &loader) { LoadInternal(loader); }
+
+string DcExtension::Name() { return "dc"; }
+
+string DcExtension::Version() const {
+#ifdef EXT_VERSION_DC
+  return EXT_VERSION_DC;
+#else
+  return "";
+#endif
+}
 } // namespace duckdb
 extern "C" {
-DUCKDB_CPP_EXTENSION_ENTRY(dc, loader) { duckdb::Load(loader); }
+DUCKDB_CPP_EXTENSION_ENTRY(dc, loader) { duckdb::LoadInternal(loader); }
 }

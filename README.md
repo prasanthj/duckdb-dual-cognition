@@ -35,7 +35,7 @@ For standalone System One throughput, scaling measurements, and the streaming im
 - **Two systems, one relation:** bounded judgment and generative transformation compose through ordinary SQL and materialized CTEs.
 - **Selective escalation:** confidence gates send only ambiguous rows to System Two while preserving one final output column.
 - **Auditable provenance:** retain the System One candidate, confidence, threshold, escalation status, System Two answer, and final source as a DuckDB `STRUCT`.
-- **Native vector execution:** evaluates DuckDB vectors directly, deduplicates equal work, batches independent rows, and dispatches bounded concurrent HTTP requests.
+- **Native relation execution:** keeps enrichment inside DuckDB's native extension path, deduplicates equal work, batches independent rows, and dispatches bounded concurrent HTTP requests without a Python or pandas transfer.
 - **Nested evidence:** accepts text, JSON, `STRUCT`, `LIST`, and `ARRAY` inputs, so complete row context can stay structured.
 - **Safe reuse:** query-local coalescing is enabled by default; optional per-connection LRU caches add TTL-based reuse across statements.
 - **Production controls:** independent concurrency, byte limits, query budgets, timeouts, retries, cancellation, and strict response validation for each system.
@@ -434,7 +434,7 @@ A SQL `NULL` in a required function argument produces a SQL `NULL` result and ma
 
 ## Batching and concurrency
 
-Both systems operate directly on DuckDB vectors. Equal work is deduplicated within the query, independent rows are packed into bounded requests, and requests run on a shared native worker pool.
+Both systems consume DuckDB input inside the native extension. Equal work is deduplicated within the query, independent rows are packed into bounded requests, and requests run on a shared native worker pool.
 
 ```sql
 SET dc_system_one_batch_size = 100;
@@ -445,6 +445,8 @@ SET dc_system_two_concurrency = 5;
 ```
 
 System One allows batches of 1–1,000 questions and concurrency of 1–10. System Two allows batches of 1–500 rows and concurrency of 1–10. Larger is not always faster: input size, provider limits, model latency, and the number of independent requests all matter. Measure the complete query for your workload.
+
+The two settings bound concurrency per query and per system. A process-wide ceiling of ten active provider requests protects the host when several DuckDB connections run enrichment simultaneously.
 
 For System One relations larger than a DuckDB vector, use `system_one_stream` to retain partial packs across input chunks. System Two scalar functions batch each DuckDB vector and preserve row order.
 

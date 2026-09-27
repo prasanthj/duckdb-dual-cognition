@@ -1,0 +1,41 @@
+# name: test/sql/dc.test
+# description: smoke test the dc extension's public SQL surface
+# group: [sql]
+
+require dc
+
+query II
+SELECT current_setting('dc_system_one_batch_size'),
+       current_setting('dc_system_two_batch_size');
+----
+25	25
+
+query T rowsort
+SELECT system FROM dc_stats();
+----
+system_one
+system_two
+
+query IIII
+SELECT system_one_noul(NULL, 'classify') IS NULL,
+       system_one_choice(NULL, 'classify', '{"a":"first", "b":"second"}') IS NULL,
+       system_two_generate(NULL, 'summarize') IS NULL,
+       system_two_extract(NULL, 'extract', '["field"]') IS NULL;
+----
+true	true	true	true
+
+query I
+SELECT count(*)
+FROM system_one_stream((
+  SELECT 1 AS row_id,
+         'unused' AS evidence,
+         '{"question":{"type":"noul", "instructions":"unused"}}' AS questions
+  WHERE false
+));
+----
+0
+
+query I
+SELECT dc_cache_clear();
+----
+true
