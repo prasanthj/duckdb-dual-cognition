@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -68,22 +68,27 @@ h1, h2, h3 { margin: 0; }
 .icon-btn svg { width: 20px; height: 20px; }
 .icon-btn[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
 
-/* ---------- dual cognition debrief ---------- */
-.dc-debrief { margin-top: 16px; padding: 16px; border: 1px solid color-mix(in srgb, var(--jev) 42%, var(--line)); border-radius: var(--r-md); background: color-mix(in srgb, var(--jev-soft) 48%, var(--panel)); animation: fadein .35s ease; }
+/* ---------- dual cognition stages ---------- */
+.jev-panel.dc-system-one-active { border: 2px solid color-mix(in srgb, var(--jev) 78%, white); box-shadow: 0 0 0 4px color-mix(in srgb, var(--jev) 11%, transparent), 0 16px 38px -20px color-mix(in srgb, var(--jev) 65%, transparent); overflow: hidden; }
+.dc-system-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -1px -1px 14px; padding: 11px 14px; background: linear-gradient(90deg, color-mix(in srgb, var(--jev) 28%, var(--panel)), color-mix(in srgb, var(--jev) 8%, var(--panel))); border-bottom: 1px solid color-mix(in srgb, var(--jev) 44%, var(--line)); }
+.dc-system-banner span { color: var(--jev); font: 800 12px/1 var(--body); letter-spacing: .12em; text-transform: uppercase; }
+.dc-system-banner strong { color: var(--ink); font: 700 13px/1.2 var(--body); }
+.dc-debrief { position: relative; margin-top: 18px; padding: 20px; border: 2px solid color-mix(in srgb, #9D7CFF 72%, var(--line)); border-radius: var(--r-md); background: linear-gradient(135deg, color-mix(in srgb, #9D7CFF 14%, var(--panel)), color-mix(in srgb, #9D7CFF 4%, var(--panel))); box-shadow: 0 0 0 4px color-mix(in srgb, #9D7CFF 9%, transparent), 0 18px 42px -22px color-mix(in srgb, #9D7CFF 70%, transparent); animation: fadein .35s ease; overflow: hidden; }
+.dc-debrief::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 5px; background: linear-gradient(#B89CFF, #7955E8); }
 .dc-debrief-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-.dc-debrief-head strong { font-family: var(--display); font-size: 20px; letter-spacing: .02em; }
-.dc-debrief-head span { color: var(--jev); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.dc-debrief-head strong { font-family: var(--display); font-size: 24px; letter-spacing: .02em; }
+.dc-debrief-head span { color: white; background: #7653D9; border: 1px solid color-mix(in srgb, #B89CFF 74%, white); border-radius: 999px; padding: 6px 10px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; }
 .dc-thinking { display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 14px; }
 .dc-thinking i { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--jev); border-radius: 50%; animation: spin .8s linear infinite; }
 .dc-summary { margin: 0 0 12px; font-weight: 700; }
 .dc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; }
 .dc-grid div { min-width: 0; }
-.dc-grid small { display: block; color: var(--jev); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 3px; }
+.dc-grid small { display: block; color: #9473EA; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 3px; }
 .dc-grid p { margin: 0; color: var(--ink-2); font-size: 13px; }
 .dc-provenance { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 8px; color: var(--ink-3); font-size: 11px; }
 .dc-error { color: var(--bad); font-size: 13px; margin: 0; }
-.dc-one-provenance { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 11px; }
-.dc-one-provenance b { color: var(--jev); text-transform: uppercase; letter-spacing: .06em; }
+.dc-one-provenance { margin-top: 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--jev) 36%, var(--line)); border-radius: var(--r-sm); background: color-mix(in srgb, var(--jev) 8%, var(--panel)); color: var(--ink-2); font-size: 11px; }
+.dc-one-provenance b { color: var(--jev); text-transform: uppercase; letter-spacing: .1em; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 700px) { .dc-grid { grid-template-columns: 1fr; } }
 
@@ -1804,7 +1809,7 @@ code { font-size: 13px; background: var(--panel-2); padding: 2px 6px; border-rad
   CC.ui.mood = (sel, mood) => $$(sel).forEach(b => b.setAttribute('data-mood', mood));
 
   /* ---------- settings ---------- */
-  const defaults = { theme: 'system', sound: false, captions: true, motion: 'system', reveal: 'after', speed: 1, difficulty: 'rough' };
+  const defaults = { theme: 'dark', sound: false, captions: true, motion: 'system', reveal: 'after', speed: 1, difficulty: 'rough' };
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem('cc-settings') || '{}'); } catch (e) { saved = {}; }
   const S = CC.settings = Object.assign({}, defaults, saved);
@@ -2219,11 +2224,17 @@ code { font-size: 13px; background: var(--panel-2); padding: 2px 6px; border-rad
     if (btn) btn.insertAdjacentHTML('beforeend', `<span class="jevmark">${JEVFACE}Jev's pick</span>`);
   }
   function showSystemOneProvenance(res) {
+    $('.dc-system-banner')?.remove();
     $('.dc-one-provenance')?.remove();
-    $('#jev').insertAdjacentHTML('beforeend', `<div class="dc-one-provenance"><b>System One</b> · ${esc(res.model || 'bounded choice')}${res.cacheHit ? ' · recalled from cache' : ''}</div>`);
+    $('#jev').classList.add('dc-system-one-active');
+    $('#jev').insertAdjacentHTML('afterbegin', `<div class="dc-system-banner"><span>System One</span><strong>Rapid constrained decision</strong></div>`);
+    $('#jev').insertAdjacentHTML('beforeend', `<div class="dc-one-provenance"><b>System One provenance</b> · ${esc(res.model || 'bounded choice')}${res.cacheHit ? ' · recalled from cache' : ''}</div>`);
   }
   function requestJev(inc) {
     G.jevState = 'pending'; G.jev = null;
+    $('#jev').classList.remove('dc-system-one-active');
+    $('.dc-system-banner')?.remove();
+    $('.dc-one-provenance')?.remove();
     mood('think'); say('Reading the evidence and the network state.');
     drawProbs(inc, 'pending');
     $('#jev-note').textContent = ''; $('#jev-agree').hidden = true;
