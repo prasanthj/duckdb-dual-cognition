@@ -13,9 +13,11 @@ System One and System Two have distinct jobs:
 *Captured from a live run using TypeSafe Jev for the bounded decision and OpenAI for the outcome-grounded strategic debrief.*
 
 <p align="center">
-  <img src="media/decision-room.png" width="49%" alt="Animated Chain Command decision room with live signals, routes, and System One" />
-  <img src="media/strategic-debrief.png" width="49%" alt="Deterministic incident outcome and System Two strategic debrief" />
+  <img src="media/system-one-wrong-choice.png" width="49%" alt="System One recommends air freight while the player deliberately locks a different low-probability action" />
+  <img src="media/system-two-wrong-choice.png" width="49%" alt="System Two explains the weaker choice and identifies the strongest unselected alternative" />
 </p>
+
+*Deliberate disagreement: System One recommended air freight while the player locked “Notify and escalate.” The deterministic engine scored the player’s choice at 204 of 306 and reduced service by eight points. System Two then explained the tradeoff and identified rerouting through Kaohsiung as the strongest unselected alternative.*
 
 ## Run it
 
