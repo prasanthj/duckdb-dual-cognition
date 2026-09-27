@@ -12,10 +12,17 @@ System One and System Two have distinct jobs:
 
 *Captured from a live run using TypeSafe Jev for the bounded decision and OpenAI for the outcome-grounded strategic debrief.*
 
-<p align="center">
-  <img src="media/system-one-wrong-choice.png" width="49%" alt="System One recommends air freight while the player deliberately locks a different low-probability action" />
-  <img src="media/system-two-wrong-choice.png" width="49%" alt="System Two explains the weaker choice and identifies the strongest unselected alternative" />
-</p>
+### System One: rapid constrained decision
+
+System One evaluates the live operational evidence and ranks only the actions the simulator can execute. In this scenario it recommends air freight while the player deliberately locks the lowest-probability action.
+
+![System One recommends air freight while the player deliberately locks a different low-probability action](media/system-one-wrong-choice.png)
+
+### System Two: outcome-grounded strategic debrief
+
+After the deterministic engine applies the selected action, System Two explains the recorded outcome, accepted tradeoff, strongest alternative, and signals to watch next.
+
+![System Two explains the weaker choice and identifies the strongest unselected alternative](media/system-two-wrong-choice.png)
 
 *Deliberate disagreement: System One recommended air freight while the player locked “Notify and escalate.” The deterministic engine scored the player’s choice at 204 of 306 and reduced service by eight points. System Two then explained the tradeoff and identified rerouting through Kaohsiung as the strongest unselected alternative.*
 
