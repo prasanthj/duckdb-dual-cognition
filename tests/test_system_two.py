@@ -110,6 +110,8 @@ def test_retry_and_metrics(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
 def test_interrupt_stops_system_two_and_connection_recovers(
     db: duckdb.DuckDBPyConnection, stub: Stub
 ) -> None:
+    db.execute("SET dc_system_two_batch_size=1")
+    db.execute("SET dc_system_two_concurrency=1")
     stub.delay = 0.5
     sql = "SELECT system_two_generate({'row':i}, 'reply') FROM range(100) t(i)"
     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -121,6 +123,15 @@ def test_interrupt_stops_system_two_and_connection_recovers(
         db.interrupt()
         with pytest.raises(duckdb.Error):
             task.result(timeout=10)
+
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        with stub.lock:
+            if stub.active == 0:
+                break
+        time.sleep(0.01)
+    with stub.lock:
+        assert stub.active == 0 and len(stub.calls) <= 1
 
     stub.delay = 0
     row = db.execute("SELECT (system_two_generate('ready', 'reply')).value").fetchone()
