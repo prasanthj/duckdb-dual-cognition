@@ -8,6 +8,7 @@ __pycache__/
 vendor/
 .pytest_cache/
 .ruff_cache/
+.cache/
 benchmarks/results/
 
 dist/
