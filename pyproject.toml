@@ -1,8 +1,8 @@
 [project]
 name = "duckdb-dual-cognition-tests"
-version = "0.2.0"
+version = "0.2.1"
 requires-python = ">=3.11"
-dependencies = ["duckdb==1.5.5"]
+dependencies = ["duckdb==1.5.6"]
 [dependency-groups]
 dev = [
     "pytest>=8,<10",

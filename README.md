@@ -3,7 +3,7 @@
 [![Native build and tests](https://github.com/prasanthj/duckdb-dual-cognition/actions/workflows/release.yml/badge.svg)](https://github.com/prasanthj/duckdb-dual-cognition/actions/workflows/release.yml)
 [![Native CI](https://github.com/prasanthj/duckdb-dual-cognition/actions/workflows/ci.yml/badge.svg)](https://github.com/prasanthj/duckdb-dual-cognition/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/prasanthj/duckdb-dual-cognition?display_name=tag&sort=semver)](https://github.com/prasanthj/duckdb-dual-cognition/releases/latest)
-[![DuckDB 1.4.5 and 1.5.5](https://img.shields.io/badge/DuckDB-1.4.5%20%7C%201.5.5-fff000?logo=duckdb&logoColor=black)](https://duckdb.org/docs/stable/extensions/extension_distribution)
+[![DuckDB 1.4.5 and 1.5.6](https://img.shields.io/badge/DuckDB-1.4.5%20%7C%201.5.6-fff000?logo=duckdb&logoColor=black)](https://duckdb.org/docs/stable/extensions/extension_distribution)
 [![Targets: macOS and Linux, x86-64 and ARM64](https://img.shields.io/badge/targets-macOS%20%7C%20Linux%20%C2%B7%20x86--64%20%7C%20ARM64-blue)](docs/distribution.md)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -43,7 +43,7 @@ For standalone System One throughput, scaling measurements, and the streaming im
 - **Safe reuse:** query-local coalescing is enabled by default; optional per-connection LRU caches add TTL-based reuse across statements.
 - **Production controls:** independent concurrency, byte limits, query budgets, timeouts, retries, cancellation, and strict response validation for each system.
 - **Observable:** `dc_stats()` separates requests, items, cache hits, retries, errors, tokens, bytes, and latency by system.
-- **Native releases:** build and test matrices cover DuckDB 1.4.5 and 1.5.5 on macOS and Linux, x86-64 and ARM64.
+- **Native releases:** build and test matrices cover DuckDB 1.4.5 and 1.5.6 on macOS and Linux, x86-64 and ARM64.
 
 ## Quick start
 
@@ -615,7 +615,7 @@ OPENAI_API_KEY=... \
 uv run pytest -q tests/test_live.py
 ```
 
-Release automation builds and loads the native extension against DuckDB 1.4.5 and 1.5.5 on Linux and macOS, x86-64 and ARM64. Archives include the extension, manifest, licenses, SPDX SBOM, SHA-256 checksum, and GitHub build provenance. See [distribution](docs/distribution.md) and [release notes](docs/release-notes.md).
+Release automation builds and loads the native extension against DuckDB 1.4.5 and 1.5.6 on Linux and macOS, x86-64 and ARM64. Archives include the extension, manifest, licenses, SPDX SBOM, SHA-256 checksum, and GitHub build provenance. See [distribution](docs/distribution.md) and [release notes](docs/release-notes.md).
 
 ## Current scope
 

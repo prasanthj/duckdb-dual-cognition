@@ -4,7 +4,7 @@
 
 Supported release targets:
 
-- DuckDB 1.4.5 and 1.5.5
+- DuckDB 1.4.5 and 1.5.6
 - Linux x86-64 and arm64
 - macOS x86-64 and arm64
 
