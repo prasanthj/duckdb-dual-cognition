@@ -61,6 +61,28 @@ def test_mult_question_rows_span_packs(db: duckdb.DuckDBPyConnection, stub: Stub
     assert len(stub.calls) == 10
 
 
+def test_resolution_stream_preserves_dynamic_foreign_keys(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
+    rows = db.execute(
+        """
+        SELECT source_id, selected_id, status, confidence, model, cache_hit
+        FROM system_one_resolve_stream((
+          SELECT source_id, {'select': selected_id} AS evidence, candidates, instructions
+          FROM (VALUES
+            (10, 'field_a', '{"field_a":"Annual revenue"}'::JSON, 'Resolve the canonical field.'),
+            (11, 'field_b', '{"field_b":"Customer identifier"}'::JSON, 'Resolve the canonical field.')
+          ) AS input(source_id, selected_id, candidates, instructions)
+        ))
+        ORDER BY source_id
+        """
+    ).fetchall()
+
+    assert rows == [
+        (10, "field_a", "matched", 1.0, "jev-stub-pinned", False),
+        (11, "field_b", "matched", 1.0, "jev-stub-pinned", False),
+    ]
+    assert len(stub.calls) == 1
+
+
 @pytest.mark.parametrize("concurrency", [1, 4])
 def test_pipeline_request_overlap(db: duckdb.DuckDBPyConnection, stub: Stub, concurrency: int) -> None:
     stub.delay = 0.03
@@ -133,9 +155,16 @@ def test_byte_splits_preserve_rows(db: duckdb.DuckDBPyConnection, stub: Stub) ->
     assert sum(len(c["body"]["questions"]) for c in stub.calls) == 200
 
 
-def test_invalid_table_shape(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM system_one_stream((SELECT 1))",
+        "SELECT * FROM system_one_resolve_stream((SELECT 1, 'evidence', '{\"a\":\"A\"}'::JSON))",
+    ],
+)
+def test_invalid_table_shape(db: duckdb.DuckDBPyConnection, stub: Stub, sql: str) -> None:
     with pytest.raises(duckdb.BinderException, match="columns"):
-        db.execute("SELECT * FROM system_one_stream((SELECT 1))").fetchall()
+        db.execute(sql).fetchall()
     assert not stub.calls
 
 

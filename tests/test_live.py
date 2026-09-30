@@ -45,6 +45,11 @@ def test_live_system_one_and_system_two_primitives() -> None:
                 '{"billing":"payments","technical":"product failures"}'::JSON),
             system_one_score('The outage is blocking every user.', 'severity',
                 '["low","medium","critical"]'::JSON),
+            system_one_resolve(
+                {'column':'annual_revenue_usd','sample':'1250000.00'},
+                '{"annual_revenue":"Revenue earned during a year",'
+                '"customer_id":"Identifier for a customer"}'::JSON,
+                'Resolve the canonical field.'),
             system_two_summarize('The customer reports a duplicate charge and asks for a refund.',
                 'Summarize in one short sentence'),
             system_two_extract('Order A-42 ships to Seattle on Friday.', 'Extract order facts',
@@ -54,8 +59,17 @@ def test_live_system_one_and_system_two_primitives() -> None:
         assert 0 <= row[0]["noul"] <= 1
         assert row[1]["choice"] in {"billing", "technical"}
         assert 0 <= row[2]["score"] <= 2
-        assert row[3]["value"].strip()
-        assert set(json.loads(row[4]["value"])) == {
+        assert row[3]["status"] in {"matched", "ambiguous", "no_match"}
+        if row[3]["status"] == "matched":
+            assert row[3]["selected_id"] in {"annual_revenue", "customer_id"}
+        assert set(row[3]["probabilities"]) == {
+            "annual_revenue",
+            "customer_id",
+            "ambiguous",
+            "no_match",
+        }
+        assert row[4]["value"].strip()
+        assert set(json.loads(row[5]["value"])) == {
             "order_id",
             "destination",
             "ship_date",

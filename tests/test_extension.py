@@ -23,6 +23,33 @@ def test_primitives(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
     assert all(call["authorization"] == "Bearer test-system-one" for call in stub.calls)
 
 
+def test_resolution_returns_foreign_key_or_abstains(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
+    rows = db.execute(
+        """
+        SELECT requested, result.selected_id, result.status, result.confidence,
+               result.probabilities, result.model, result.cache_hit
+        FROM (
+          SELECT requested, system_one_resolve(
+            {'select': requested},
+            '{"supplier_1":"Acme Industrial Supply"}'::JSON,
+            'Resolve the canonical supplier.'
+          ) AS result
+          FROM (VALUES ('supplier_1'), ('ambiguous'), ('no_match')) AS input(requested)
+        )
+        ORDER BY requested
+        """
+    ).fetchall()
+
+    assert [(row[0], row[1], row[2]) for row in rows] == [
+        ("ambiguous", None, "ambiguous"),
+        ("no_match", None, "no_match"),
+        ("supplier_1", "supplier_1", "matched"),
+    ]
+    assert all(row[3] == 1.0 and row[5] == "jev-stub-pinned" and not row[6] for row in rows)
+    assert all(set(row[4]) == {"supplier_1", "ambiguous", "no_match"} for row in rows)
+    assert len(stub.calls) == 1
+
+
 def test_null_and_explain_never_call(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
     db.execute("EXPLAIN SELECT system_one_noul('hello','urgent?')").fetchall()
     assert db.execute("SELECT system_one_noul(NULL,'urgent?'), system_one_noul('x',NULL)").fetchone() == (None, None)
@@ -74,6 +101,8 @@ def test_selection_and_multichunk_order(db: duckdb.DuckDBPyConnection, stub: Stu
     [
         "SELECT system_one_choice('x','p','{}')",
         "SELECT system_one_score('x','p','[\"one\"]')",
+        "SELECT system_one_resolve('x','{}','resolve')",
+        "SELECT system_one_resolve('x','{\"no_match\":\"reserved\"}','resolve')",
         "SELECT system_one_noul('null'::JSON,'p')",
         "SELECT system_one_noul({'x':'NaN'::DOUBLE},'p')",
     ],

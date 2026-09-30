@@ -20,6 +20,7 @@ struct StreamPack {
 };
 struct StreamState : LocalTableFunctionState {
   ClientContext &ctx;
+  bool resolution;
   shared_ptr<QueryState> query;
   std::optional<Options> options;
   std::deque<std::shared_ptr<StreamRow>> rows;
@@ -32,7 +33,8 @@ struct StreamState : LocalTableFunctionState {
   std::mutex mutex;
   std::exception_ptr error;
 
-  explicit StreamState(ClientContext &context) : ctx(context) {
+  explicit StreamState(ClientContext &context, bool resolve = false)
+      : ctx(context), resolution(resolve) {
     query = ctx.registered_state->GetOrCreate<QueryState>(
         "dc_system_one_query_state");
   }
@@ -154,8 +156,11 @@ struct StreamState : LocalTableFunctionState {
     row->query = query;
     // SQL NULL evidence/questions short-circuits parsing and configuration.
     auto evidence_value = input.GetValue(1, index);
-    auto questions_value = input.GetValue(2, index);
-    row->null = evidence_value.IsNull() || questions_value.IsNull();
+    auto third_value = input.GetValue(2, index);
+    auto instructions_value =
+        resolution ? input.GetValue(3, index) : Value(VarcharType());
+    row->null = evidence_value.IsNull() || third_value.IsNull() ||
+                (resolution && instructions_value.IsNull());
     string key;
     Json evidence;
     if (!row->null) {
@@ -163,7 +168,13 @@ struct StreamState : LocalTableFunctionState {
       evidence = Evidence(evidence_value);
       if (!Description(evidence))
         Fail("state must be text, STRUCT, JSON object or array");
-      row->questions = Document(questions_value);
+      if (resolution) {
+        row->questions = {
+            {"answer", ResolutionQuestion(Document(third_value),
+                                          Evidence(instructions_value))}};
+      } else {
+        row->questions = Document(third_value);
+      }
       ValidateQuestions(row->questions);
       key = Json::array({evidence, row->questions}).dump();
       if (key.size() > options->bytes)
@@ -235,18 +246,26 @@ struct StreamState : LocalTableFunctionState {
         break;
       output.SetValue(0, count, row->id);
       if (row->null) {
-        output.SetValue(1, count, Value(LogicalType::JSON()));
-        output.SetValue(2, count, Value(VarcharType()));
-        output.SetValue(3, count, Value(BooleanType()));
+        for (idx_t column = 1; column < output.ColumnCount(); column++)
+          output.SetValue(column, count, Value(output.data[column].GetType()));
       } else {
         while (row->flight->future.wait_for(std::chrono::milliseconds(20)) !=
                std::future_status::ready)
           Check();
         auto answer = Json::parse(*row->flight->future.get());
         Check();
-        output.SetValue(1, count, JsonValue(answer["answers"]));
-        output.SetValue(2, count, Value(answer["model"].get<string>()));
-        output.SetValue(3, count, Value(!row->owner));
+        if (resolution) {
+          const auto resolved =
+              ResolutionValue(answer["answers"]["answer"],
+                              answer["model"].get<string>(), !row->owner);
+          const auto &children = StructValue::GetChildren(resolved);
+          for (idx_t column = 0; column < children.size(); column++)
+            output.SetValue(column + 1, count, children[column]);
+        } else {
+          output.SetValue(1, count, JsonValue(answer["answers"]));
+          output.SetValue(2, count, Value(answer["model"].get<string>()));
+          output.SetValue(3, count, Value(!row->owner));
+        }
       }
       {
         std::lock_guard<std::mutex> lock(mutex);
@@ -272,6 +291,23 @@ static unique_ptr<FunctionData> StreamBind(ClientContext &,
   names = {"row_id", "answers", "model", "cache_hit"};
   return make_uniq<TableFunctionData>();
 }
+static unique_ptr<FunctionData> ResolveStreamBind(ClientContext &,
+                                                  TableFunctionBindInput &input,
+                                                  vector<LogicalType> &types,
+                                                  vector<string> &names) {
+  if (input.input_table_types.size() != 4)
+    throw BinderException(
+        "system_one_resolve_stream expects TABLE columns (source_id, "
+        "evidence, candidates, instructions)");
+  const auto result = ResolutionReturnType();
+  types = {input.input_table_types[0]};
+  names = {"source_id"};
+  for (idx_t i = 0; i < StructType::GetChildCount(result); i++) {
+    names.push_back(StructType::GetChildName(result, i));
+    types.push_back(StructType::GetChildType(result, i));
+  }
+  return make_uniq<TableFunctionData>();
+}
 static unique_ptr<GlobalTableFunctionState>
 StreamGlobal(ClientContext &, TableFunctionInitInput &) {
   // One input producer makes retained-memory bounds and cross-chunk packing
@@ -282,6 +318,11 @@ static unique_ptr<LocalTableFunctionState>
 StreamLocal(ExecutionContext &context, TableFunctionInitInput &,
             GlobalTableFunctionState *) {
   return make_uniq<StreamState>(context.client);
+}
+static unique_ptr<LocalTableFunctionState>
+ResolveStreamLocal(ExecutionContext &context, TableFunctionInitInput &,
+                   GlobalTableFunctionState *) {
+  return make_uniq<StreamState>(context.client, true);
 }
 static OperatorResultType StreamInput(ExecutionContext &,
                                       TableFunctionInput &data,
@@ -311,4 +352,10 @@ static void RegisterStream(ExtensionLoader &loader) {
   function.in_out_function = StreamInput;
   function.in_out_function_final = StreamFinal;
   loader.RegisterFunction(function);
+  TableFunction resolve("system_one_resolve_stream", {LogicalType::TABLE},
+                        nullptr, ResolveStreamBind, StreamGlobal,
+                        ResolveStreamLocal);
+  resolve.in_out_function = StreamInput;
+  resolve.in_out_function_final = StreamFinal;
+  loader.RegisterFunction(resolve);
 }

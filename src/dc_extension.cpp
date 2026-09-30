@@ -193,6 +193,28 @@ static void ValidateQuestions(const Json &qs) {
       Fail("unknown question type");
   }
 }
+static constexpr const char *RESOLUTION_AMBIGUOUS = "ambiguous";
+static constexpr const char *RESOLUTION_NO_MATCH = "no_match";
+static Json ResolutionQuestion(Json candidates, Json instructions) {
+  if (!candidates.is_object() || candidates.empty() || candidates.size() > 253)
+    Fail("resolution requires 1-253 named candidates");
+  if (candidates.contains(RESOLUTION_AMBIGUOUS) ||
+      candidates.contains(RESOLUTION_NO_MATCH))
+    Fail("resolution candidate IDs may not be 'ambiguous' or 'no_match'");
+  candidates[RESOLUTION_AMBIGUOUS] =
+      "Multiple candidates are equally plausible; a unique match cannot be "
+      "selected.";
+  candidates[RESOLUTION_NO_MATCH] =
+      "None of the supplied candidates matches the evidence.";
+  return {{"type", "choice"},
+          {"instructions",
+           {{"task", std::move(instructions)},
+            {"resolution_policy",
+             "Select one supplied candidate ID. Select no_match when none "
+             "matches, or ambiguous when more than one candidate is equally "
+             "plausible."}}},
+          {"criteria", std::move(candidates)}};
+}
 static Value Setting(ClientContext &ctx, const string &name) {
   Value result;
   if (!ctx.TryGetCurrentSetting(name, result))
@@ -980,6 +1002,34 @@ static Value Probabilities(const Json &j) {
   return Value::MAP(VarcharType(), DoubleType(), std::move(keys),
                     std::move(values));
 }
+static Value ResolutionValue(const Json &answer, const string &model,
+                             bool cache_hit) {
+  const auto choice = answer.at("choice").get<string>();
+  const bool matched =
+      choice != RESOLUTION_AMBIGUOUS && choice != RESOLUTION_NO_MATCH;
+  child_list_t<Value> values;
+  values.emplace_back("selected_id",
+                      matched ? Value(choice) : Value(VarcharType()));
+  values.emplace_back("status", Value(matched ? "matched" : choice));
+  values.emplace_back("confidence",
+                      Value(answer.at("confidence").get<double>()));
+  values.emplace_back("probabilities",
+                      Probabilities(answer.at("probabilities")));
+  values.emplace_back("model", Value(model));
+  values.emplace_back("cache_hit", Value(cache_hit));
+  return Value::STRUCT(std::move(values));
+}
+static LogicalType ResolutionReturnType() {
+  child_list_t<LogicalType> fields;
+  fields.emplace_back("selected_id", VarcharType());
+  fields.emplace_back("status", VarcharType());
+  fields.emplace_back("confidence", DoubleType());
+  fields.emplace_back("probabilities",
+                      LogicalType::MAP(VarcharType(), DoubleType()));
+  fields.emplace_back("model", VarcharType());
+  fields.emplace_back("cache_hit", BooleanType());
+  return LogicalType::STRUCT(fields);
+}
 static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
   auto &ctx = state.GetContext();
   auto &expr = state.expr.Cast<BoundFunctionExpression>();
@@ -1032,10 +1082,15 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
     Json evidence = document(0, r, false);
     if (!Description(evidence))
       Fail("state must be text, STRUCT, JSON object or array");
-    Json q = {{"type", name.substr(string("system_one_").size())},
-              {"instructions", document(1, r, false)}};
-    if (args.ColumnCount() > 2)
-      q["criteria"] = document(2, r, true);
+    Json q;
+    if (name == "system_one_resolve") {
+      q = ResolutionQuestion(document(1, r, true), document(2, r, false));
+    } else {
+      q = {{"type", name.substr(string("system_one_").size())},
+           {"instructions", document(1, r, false)}};
+      if (args.ColumnCount() > 2)
+        q["criteria"] = document(2, r, true);
+    }
     Json qs = {{"answer", q}};
     ValidateQuestions(qs);
     string key = Json::array({evidence, qs}).dump();
@@ -1205,8 +1260,12 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
       continue;
     }
     auto &row = rows[mapping[r]];
-    child_list_t<Value> values;
     auto &a = row.answers["answer"];
+    if (name == "system_one_resolve") {
+      result.SetValue(r, ResolutionValue(a, row.model, hit[r]));
+      continue;
+    }
+    child_list_t<Value> values;
     if (name == "system_one_noul")
       values.emplace_back("noul", Value(a["noul"].get<double>()));
     else {
@@ -1227,6 +1286,8 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
   metrics.cache_hits += std::count(hit.begin(), hit.end(), true);
 }
 static LogicalType ReturnType(const string &name) {
+  if (name == "system_one_resolve")
+    return ResolutionReturnType();
   child_list_t<LogicalType> fields;
   if (name == "system_one_noul")
     fields.emplace_back("noul", DoubleType());
@@ -1408,11 +1469,12 @@ static void LoadInternal(ExtensionLoader &loader) {
   config.AddExtensionOption("dc_system_two_max_requests_per_query",
                             "Maximum System Two HTTP requests per query",
                             BigintType(), Value::BIGINT(2000));
-  for (string name :
-       {"system_one_noul", "system_one_choice", "system_one_score"}) {
+  for (string name : {"system_one_noul", "system_one_choice",
+                      "system_one_score", "system_one_resolve"}) {
     ScalarFunctionSet set(name);
     for (int argc : {2, 3}) {
-      if (argc == 2 && name != "system_one_noul")
+      if ((argc == 2 && name != "system_one_noul") ||
+          (argc != 3 && name == "system_one_resolve"))
         continue;
       vector<LogicalType> args(argc, AnyType());
       ScalarFunction fn(name, args, ReturnType(name), Evaluate);

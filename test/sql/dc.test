@@ -16,13 +16,14 @@ SELECT system FROM dc_stats();
 system_one
 system_two
 
-query IIII
+query IIIII
 SELECT system_one_noul(NULL, 'classify') IS NULL,
        system_one_choice(NULL, 'classify', '{"a":"first", "b":"second"}') IS NULL,
+       system_one_resolve(NULL, '{"a":"first"}', 'resolve') IS NULL,
        system_two_generate(NULL, 'summarize') IS NULL,
        system_two_extract(NULL, 'extract', '["field"]') IS NULL;
 ----
-true	true	true	true
+true	true	true	true	true
 
 query I
 SELECT count(*)
@@ -30,6 +31,18 @@ FROM system_one_stream((
   SELECT 1 AS row_id,
          'unused' AS evidence,
          '{"question":{"type":"noul", "instructions":"unused"}}' AS questions
+  WHERE false
+));
+----
+0
+
+query I
+SELECT count(*)
+FROM system_one_resolve_stream((
+  SELECT 1 AS source_id,
+         'unused' AS evidence,
+         '{"candidate":"unused"}' AS candidates,
+         'unused' AS instructions
   WHERE false
 ));
 ----

@@ -109,7 +109,8 @@ class Stub:
                                 answer = {"type": kind, "noul": (int(number) % 10) / 10}
                             elif kind == "choice":
                                 options = list(question["criteria"])
-                                chosen = options[int(number) % len(options)]
+                                requested = evidence.get("select") if isinstance(evidence, dict) else None
+                                chosen = requested if requested in options else options[int(number) % len(options)]
                                 answer = {
                                     "type": kind,
                                     "choice": chosen,

@@ -9,6 +9,8 @@
 
 Compose fast, bounded System One judgments with selective System Two reasoning in one native DuckDB SQL pipeline. Classify every row cheaply, escalate only ambiguity, and keep the final value plus its decision provenance in the relation.
 
+**Semantic Resolution assigns reliable foreign keys when exact joins cannot.** Give each row a bounded set of reference candidates and `system_one_resolve` selects the canonical key, returns `ambiguous`, or abstains with `no_match`—with confidence and provenance attached.
+
 ![Animated terminal walkthrough: confidence-gated classification, selective System Two escalation, and decision provenance](docs/images/terminal-demo.gif)
 
 *Captured from a live run against TypeSafe Jev 1.13.0 and OpenAI gpt-5.6-luna. Eight support cases were classified in one System One batch, and rows below the 0.50 confidence threshold were resolved by System Two with complete provenance. Repeating the identical SQL produced 8/8 System One cache hits, cache hits for every escalated System Two row, and zero new provider requests. Requests run concurrently within each stage when a workload produces multiple batches; the two stages are sequential because the confidence gate determines which rows reach System Two. Reproduce it with `TYPESAFE_API_KEY=... OPENAI_API_KEY=... vhs examples/live_terminal_demo.tape` (provider charges apply).*
@@ -19,7 +21,7 @@ Many enrichment workloads contain two different kinds of work:
 
 | Path | Best at | Cost profile | SQL functions |
 |---|---|---|---|
-| **System One** | finite choices, scores, predicates, routing | fast and highly batchable | `system_one_choice`, `system_one_score`, `system_one_noul`, `system_one_stream` |
+| **System One** | finite choices, scores, predicates, routing, semantic resolution | fast and highly batchable | `system_one_choice`, `system_one_score`, `system_one_noul`, `system_one_resolve`, `system_one_stream` |
 | **System Two** | generation, summarization, extraction, resolving ambiguity | deeper and more expensive | `system_two_generate`, `system_two_summarize`, `system_two_extract` |
 
 The useful pattern is composition. Run System One across the full relation, route only low-confidence rows to System Two, and merge both paths into a single derived column. DuckDB retains the source columns, result, confidence, fallback decision, and provenance without exporting data through pandas or a temporary JSON workflow.
@@ -33,6 +35,7 @@ For standalone System One throughput, scaling measurements, and the streaming im
 ## Features
 
 - **Two systems, one relation:** bounded judgment and generative transformation compose through ordinary SQL and materialized CTEs.
+- **Semantic Resolution:** assign canonical foreign keys from per-row candidates, with explicit `matched`, `ambiguous`, and `no_match` outcomes.
 - **Selective escalation:** confidence gates send only ambiguous rows to System Two while preserving one final output column.
 - **Auditable provenance:** retain the System One candidate, confidence, threshold, escalation status, System Two answer, and final source as a DuckDB `STRUCT`.
 - **Native relation execution:** keeps enrichment inside DuckDB's native extension path, deduplicates equal work, batches independent rows, and dispatches bounded concurrent HTTP requests without a Python or pandas transfer.
@@ -213,6 +216,49 @@ FROM (
 ```
 
 Result: `STRUCT(choice VARCHAR, confidence DOUBLE, probabilities JSON, model VARCHAR, cache_hit BOOLEAN)`.
+
+#### Semantic Resolution: reliable foreign keys when exact joins cannot
+
+`system_one_resolve(evidence, candidates, instructions)`
+
+Use resolution when each source row has its own bounded candidate records. Candidate keys become the returned foreign keys; `ambiguous` and `no_match` are added automatically.
+
+```sql
+SELECT source_column,
+       result.selected_id AS canonical_field,
+       result.status,
+       result.confidence
+FROM (
+  SELECT source_column,
+         system_one_resolve(
+           {'column': source_column, 'sample': sample_value},
+           candidates,
+           'Resolve the canonical field.'
+         ) AS result
+  FROM incoming_schema
+);
+```
+
+For example, `cust_rev` can resolve to the candidate key `annual_revenue`; a source column with no valid candidate returns `selected_id = NULL` and `status = 'no_match'`.
+
+Result: `STRUCT(selected_id VARCHAR, status VARCHAR, confidence DOUBLE, probabilities MAP(VARCHAR, DOUBLE), model VARCHAR, cache_hit BOOLEAN)`.
+
+Candidate IDs named `ambiguous` or `no_match` are reserved. SQL `NULL` in any required argument returns SQL `NULL` without a provider call.
+
+For relations larger than one DuckDB vector, use `system_one_resolve_stream(TABLE(...))`. Its subquery must return source ID, evidence, candidate JSON, and instructions in that order:
+
+```sql
+SELECT source_id, selected_id, status, confidence
+FROM system_one_resolve_stream((
+  SELECT column_id,
+         {'column': column_name, 'sample': sample_value},
+         candidates,
+         'Resolve the canonical field.'
+  FROM incoming_schema
+));
+```
+
+The streaming result preserves the source ID and returns `selected_id`, `status`, `confidence`, `probabilities`, `model`, and `cache_hit`.
 
 #### Score: position on an ordered rubric
 

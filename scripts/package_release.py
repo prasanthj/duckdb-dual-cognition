@@ -41,7 +41,11 @@ def main() -> None:
         if actual != (args.platform,) or duckdb.__version__ != args.duckdb_version:
             raise RuntimeError(f"Runtime mismatch: DuckDB {duckdb.__version__}, platform {actual}")
         con.execute(f"LOAD '{binary}'")
-        if con.execute("SELECT system_one_noul(NULL,'no API call')").fetchone() != (None,):
+        smoke = con.execute(
+            "SELECT system_one_noul(NULL,'no API call'), "
+            "system_one_resolve(NULL, '{\"candidate\":\"unused\"}', 'no API call')"
+        ).fetchone()
+        if smoke != (None, None):
             raise RuntimeError("Native smoke check failed")
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
