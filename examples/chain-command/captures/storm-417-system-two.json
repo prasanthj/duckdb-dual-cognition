@@ -1,0 +1,11 @@
+{
+  "debrief": {
+    "situation_summary": "Yantian’s 12-day closure threatens a renewal-critical infusion-pump order, with only 8 days of inventory coverage and high renewal risk.",
+    "why_this_decision": "Notifying and escalating gave Halvorsen Medical an honest early warning and preserved some customer trust, but the order still slipped. The outcome scored 203 of 306 points.",
+    "strongest_alternative": "Reroute through Kaohsiung was the identified strongest alternative, but it was not selected. Its stated delay was 4 days.",
+    "tradeoff": "The selected action supported transparency and customer trust (+5) but reduced service level (-9); inventory health, operating margin, and resilience were unchanged.",
+    "what_to_watch_next": "Track the delayed order and Halvorsen Medical’s renewal next quarter, along with the 8-day inventory position, the 4-day alternative-port delay, and the $42K air-freight cost."
+  },
+  "model": "gpt-5.6-luna",
+  "cache_hit": false
+}

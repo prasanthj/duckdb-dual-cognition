@@ -1,0 +1,12 @@
+{
+  "choice": "air_freight",
+  "confidence": 0.37,
+  "probabilities": {
+    "air_freight": 0.53,
+    "consume_safety_stock": 0.13,
+    "notify_customer": 0.04,
+    "reroute_kaohsiung": 0.3
+  },
+  "model": "jev-1.13.0",
+  "cache_hit": false
+}

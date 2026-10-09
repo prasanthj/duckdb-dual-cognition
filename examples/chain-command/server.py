@@ -196,7 +196,7 @@ def main() -> None:
     port = int(os.environ.get("CHAIN_COMMAND_PORT", "8787"))
     Handler.app = ChainCommand()
     server = ThreadingHTTPServer((host, port), Handler)
-    url = f"http://{host}:{port}"
+    url = f"http://{host}:{port}/?live=1"
     print(f"Chain Command is running at {url}")
     print("Press Ctrl-C to stop.")
     if os.environ.get("CHAIN_COMMAND_OPEN_BROWSER", "1") != "0":

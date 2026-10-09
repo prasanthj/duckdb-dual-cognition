@@ -1,6 +1,13 @@
 # Chain Command
 
-Chain Command is the original playable supply-chain control-tower artifact, now connected to the `dc` native extension. It runs a complete 12-incident shift with a live signal feed, animated ships, trucks and aircraft, an expressive robot operator, difficulty modes, decision timers, carry-forward consequences, autopilot, network-health views, a decision log, and a final scorecard.
+Chain Command makes one contrast tangible: a human works through one genuinely hard supply-chain decision under pressure, while System One applies the same bounded decision pattern across hundreds of rows per second. System Two stays off the critical path and explains the consequential outcomes.
+
+The default public experience is a self-contained replay with two paths:
+
+1. **Try the hard decision** opens one Storm-season incident with the full evidence, network state, operational tradeoffs, and a human decision clock.
+2. **Compare human vs AI speed** opens a Human / AI toggle and animates one second at the recorded Jev Choice rate. The source benchmark completed 1,000 decisions in a median 0.515 seconds, or about 1,943 decisions per second, using batch size 100 and concurrency 10.
+
+The live provider mode retains the complete 12-incident control-tower game with a live signal feed, animated ships, trucks and aircraft, carry-forward consequences, autopilot, network-health views, a decision log, and a final scorecard.
 
 System One and System Two have distinct jobs:
 
@@ -26,7 +33,15 @@ After the deterministic engine applies the selected action, System Two explains 
 
 *Deliberate disagreement: System One recommended air freight while the player locked “Notify and escalate.” The deterministic engine scored the player’s choice at 204 of 306 and reduced service by eight points. System Two then explained the tradeoff and identified rerouting through Kaohsiung as the strongest unselected alternative.*
 
-## Run it
+## Play the static replay
+
+Open `index.html` directly or serve the directory from any static host. The default mode is a self-contained interactive replay. The human challenge uses one hard incident; the scale view compares one human decision with a one-second simulation at the recorded Jev rate. The representative System One response was captured from Jev 1.13.0. If the player chooses “Notify and escalate,” the System Two debrief is the corresponding captured gpt-5.6-luna response over the deterministic outcome. Other choices receive deterministic embedded debriefs so every branch remains playable. No provider is contacted by the public page, no credential is needed, and no inference cost is incurred.
+
+The interface labels both stages as replayed responses so the public demo does not imply that it is running live inference.
+
+The captured provider outputs are checked in under [`captures/`](captures/) for inspection.
+
+## Run it with live providers
 
 Requirements: a C++17 toolchain, libcurl, Git, [uv](https://docs.astral.sh/uv/), and credentials for the two configured providers.
 
@@ -42,13 +57,13 @@ The launcher:
 - installs the pinned Python environment with `uv`;
 - builds the native DuckDB extension when its artifact is absent;
 - creates a local DuckDB connection and provider secret in memory;
-- opens `http://127.0.0.1:8787` in the default browser.
+- opens `http://127.0.0.1:8787/?live=1` in the default browser.
 
 No credential is sent to the browser or written to disk. The server binds only to loopback. Override `TYPESAFE_MODEL`, `OPENAI_MODEL`, or `CHAIN_COMMAND_PORT` through environment variables. Set `CHAIN_COMMAND_OPEN_BROWSER=0` to suppress automatic browser launch.
 
 Provider calls may incur charges. Exact incident replays use the extension’s per-connection cache. The UI identifies recalled results without changing their provenance.
 
-## Game behavior
+## Live game behavior
 
 - Three difficulty modes: Calm seas, Rough water, and Storm season.
 - Twelve incidents drawn from 27 event families, with the representative Yantian closure first.

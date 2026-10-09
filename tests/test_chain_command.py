@@ -102,8 +102,8 @@ def test_http_contract_serves_the_artifact_and_both_cognition_routes() -> None:
         artifact = response.read().decode()
         assert response.status == 200
         assert "Chain Command" in artifact
-        assert "window.CHAIN_COMMAND_JEV_ENDPOINT = '/api/system-one'" in artifact
-        assert "fetch('/api/system-two'" in artifact
+        assert "Interactive model replay" in artifact
+        assert "No provider is contacted" in artifact
 
         decision = {
             "incident": {"title": "Yantian closure"},
