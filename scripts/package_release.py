@@ -30,7 +30,7 @@ def main() -> None:
     parser.add_argument(
         "--duckdb-version",
         default=os.environ.get("DUCKDB_VERSION", "1.5.6"),
-        choices=["1.4.5", "1.5.6"],
+        choices=["1.4.5", "1.5.6", "2.0.0"],
     )
     args = parser.parse_args()
     build_dir = Path(os.environ.get("DC_BUILD_DIR", ROOT / "build"))

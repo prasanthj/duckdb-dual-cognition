@@ -111,7 +111,7 @@ static void EvaluateSystemTwo(DataChunk &args, ExpressionState &state,
                               Vector &result) {
   auto &ctx = state.GetContext();
   auto &expr = state.expr.Cast<BoundFunctionExpression>();
-  const string name = expr.function.name;
+  const string name = FunctionName(expr);
   const string operation = name.substr(string("system_two_").size());
   auto query = ctx.registered_state->GetOrCreate<QueryState>(
       "dc_system_two_query_state");
@@ -308,16 +308,14 @@ static LogicalType SystemTwoReturnType(bool json) {
 
 static void RegisterSystemTwo(ExtensionLoader &loader) {
   for (const string &name : {"system_two_generate", "system_two_summarize"}) {
-    ScalarFunction function(name, {AnyType(), AnyType()},
+    ScalarFunction function(SqlIdentifier(name), {AnyType(), AnyType()},
                             SystemTwoReturnType(false), EvaluateSystemTwo);
-    function.stability = FunctionStability::VOLATILE;
-    function.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    ConfigureVolatileFunction(function);
     loader.RegisterFunction(function);
   }
   ScalarFunction extract("system_two_extract",
                          {AnyType(), AnyType(), AnyType()},
                          SystemTwoReturnType(true), EvaluateSystemTwo);
-  extract.stability = FunctionStability::VOLATILE;
-  extract.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+  ConfigureVolatileFunction(extract);
   loader.RegisterFunction(extract);
 }

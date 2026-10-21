@@ -1,6 +1,7 @@
 #define DUCKDB_EXTENSION_MAIN
 #include "dc_extension.hpp"
 #include "duckdb.hpp"
+#include "duckdb_compat.hpp"
 #include "duckdb/catalog/catalog_transaction.hpp"
 #include "duckdb/execution/expression_executor_state.hpp"
 #include "duckdb/function/table_function.hpp"
@@ -120,7 +121,8 @@ static Json Evidence(const Value &v) {
     Json obj = Json::object();
     auto &values = StructValue::GetChildren(v);
     for (idx_t i = 0; i < values.size(); i++)
-      obj[StructType::GetChildName(v.type(), i)] = Evidence(values[i]);
+      obj[static_cast<const string &>(StructType::GetChildName(v.type(), i))] =
+          Evidence(values[i]);
     return obj;
   }
   case LogicalTypeId::LIST:
@@ -217,7 +219,7 @@ static Json ResolutionQuestion(Json candidates, Json instructions) {
 }
 static Value Setting(ClientContext &ctx, const string &name) {
   Value result;
-  if (!ctx.TryGetCurrentSetting(name, result))
+  if (!ctx.TryGetCurrentSetting(SqlIdentifier(name), result))
     Fail("missing setting " + name);
   return result;
 }
@@ -244,7 +246,7 @@ static void CopySecretOption(const string &name, const CreateSecretInput &input,
                              KeyValueSecret &secret) {
   auto value = input.options.find(name);
   if (value != input.options.end())
-    secret.secret_map[name] = value->second;
+    secret.secret_map[SqlIdentifier(name)] = value->second;
 }
 static unique_ptr<BaseSecret> CreateDcSecret(ClientContext &,
                                              CreateSecretInput &input) {
@@ -278,7 +280,7 @@ static void RegisterDcSecret(ExtensionLoader &loader) {
        {"system_one_provider", "system_one_api_key", "system_one_endpoint",
         "system_one_model", "system_two_provider", "system_two_api_key",
         "system_two_endpoint", "system_two_model"})
-    function.named_parameters[name] = VarcharType();
+    function.named_parameters[SqlIdentifier(name)] = VarcharType();
   loader.RegisterFunction(function);
 }
 static DcSecretOptions Secret(ClientContext &ctx) {
@@ -291,7 +293,7 @@ static DcSecretOptions Secret(ClientContext &ctx) {
   const auto &secret = dynamic_cast<const KeyValueSecret &>(match.GetSecret());
   Value value;
   auto copy = [&](const string &name, string &target) {
-    if (secret.TryGetValue(name, value) && !value.IsNull())
+    if (secret.TryGetValue(SqlIdentifier(name), value) && !value.IsNull())
       target = value.ToString();
   };
   copy("system_one_provider", result.system_one_provider);
@@ -1033,7 +1035,7 @@ static LogicalType ResolutionReturnType() {
 static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
   auto &ctx = state.GetContext();
   auto &expr = state.expr.Cast<BoundFunctionExpression>();
-  string name = expr.function.name;
+  string name = FunctionName(expr);
   auto query = ctx.registered_state->GetOrCreate<QueryState>(
       "dc_system_one_query_state");
   struct Row {
@@ -1314,7 +1316,7 @@ struct StatsState : public GlobalTableFunctionState {
 static unique_ptr<FunctionData> StatsBind(ClientContext &,
                                           TableFunctionBindInput &,
                                           vector<LogicalType> &types,
-                                          vector<string> &names) {
+                                          vector<SqlIdentifier> &names) {
   names = {"system",         "requests",         "items",
            "cache_hits",     "retries",          "errors",
            "input_tokens",   "output_tokens",    "request_bytes",
@@ -1381,7 +1383,7 @@ static void LoadInternal(ExtensionLoader &loader) {
         for (idx_t r = 0; r < args.size(); r++)
           result.SetValue(r, Value(true));
       });
-  clear.stability = FunctionStability::VOLATILE;
+  ConfigureVolatileFunction(clear);
   loader.RegisterFunction(clear);
   auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
   config.AddExtensionOption("dc_system_one_session_cache_bytes",
@@ -1471,15 +1473,14 @@ static void LoadInternal(ExtensionLoader &loader) {
                             BigintType(), Value::BIGINT(2000));
   for (string name : {"system_one_noul", "system_one_choice",
                       "system_one_score", "system_one_resolve"}) {
-    ScalarFunctionSet set(name);
+    ScalarFunctionSet set{SqlIdentifier(name)};
     for (int argc : {2, 3}) {
       if ((argc == 2 && name != "system_one_noul") ||
           (argc != 3 && name == "system_one_resolve"))
         continue;
       vector<LogicalType> args(argc, AnyType());
-      ScalarFunction fn(name, args, ReturnType(name), Evaluate);
-      fn.stability = FunctionStability::VOLATILE;
-      fn.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+      ScalarFunction fn(SqlIdentifier(name), args, ReturnType(name), Evaluate);
+      ConfigureVolatileFunction(fn);
       set.AddFunction(fn);
     }
     loader.RegisterFunction(set);

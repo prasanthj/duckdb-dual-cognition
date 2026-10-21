@@ -4,11 +4,11 @@
 
 Supported release targets:
 
-- DuckDB 1.4.5 and 1.5.6
+- DuckDB 1.4.5, 1.5.6 and 2.0.0
 - Linux x86-64 and arm64
 - macOS x86-64 and arm64
 
-Every release job builds the native binary, loads it into the matching DuckDB runtime, runs the deterministic suite, and packages the verified artifact with a manifest, SBOM, licenses, and SHA-256 checksum. The publish job runs only after all eight targets pass.
+Every release job builds the native binary, loads it into the matching DuckDB runtime, runs the deterministic suite, and packages the verified artifact with a manifest, SBOM, licenses, and SHA-256 checksum. The publish job runs only after all twelve targets pass.
 
 Install a release by extracting the archive for the exact DuckDB version and platform, then loading the absolute path:
 
