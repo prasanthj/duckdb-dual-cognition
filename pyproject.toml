@@ -1,6 +1,6 @@
 [project]
 name = "duckdb-dual-cognition-tests"
-version = "0.2.1"
+version = "0.2.2"
 requires-python = ">=3.11"
 dependencies = ["duckdb==1.5.6"]
 [dependency-groups]
@@ -16,6 +16,8 @@ dev = [
 testpaths = ["tests"]
 [tool.ruff]
 line-length = 120
+[tool.ruff.lint.isort]
+known-third-party = ["duckdb"]
 [tool.pyright]
 typeCheckingMode = "basic"
 extraPaths = ["tests"]
