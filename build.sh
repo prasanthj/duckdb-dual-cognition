@@ -73,14 +73,10 @@ version_marker="$build_dir/.dc-duckdb-version"
 if [ -d "$build_dir" ] && [ "$(cat "$version_marker" 2>/dev/null || true)" != "$duckdb_version" ]; then
   rm -rf "$build_dir"
 fi
-legacy_interrupt=OFF
-[ "$duckdb_version" = 1.4.5 ] && legacy_interrupt=ON
-
 uv run cmake -S "$source_dir" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 \
   -DBUILD_UNITTESTS=OFF -DBUILD_SHELL=OFF -DDISABLE_UNITY=OFF -DENABLE_JEMALLOC=OFF \
   -DEXTENSION_STATIC_BUILD=OFF -DDUCKDB_EXPLICIT_VERSION="v$duckdb_version" \
   -DDC_PREBUILT_DUCKDB_STATIC_DIR="$PWD/$static_dir" \
-  -DDC_DUCKDB_1_4="$legacy_interrupt" \
   -DDUCKDB_EXTENSION_CONFIGS="$PWD/extension_config.cmake" "$@"
 printf '%s\n' "$duckdb_version" > "$version_marker"
 uv run cmake --build "$build_dir" --target dc_loadable_extension --parallel "${DC_BUILD_JOBS:-4}"

@@ -16,4 +16,22 @@ Install a release by extracting the archive for the exact DuckDB version and pla
 LOAD '/path/to/dc.duckdb_extension';
 ```
 
-Until the project is accepted as a signed DuckDB Community Extension, connect with unsigned extensions enabled. Do not substitute an artifact built for another DuckDB version or architecture.
+GitHub release archives are unsigned; enable unsigned extensions when loading those files. Do not substitute an artifact built for another DuckDB version or architecture.
+
+For versions published to DuckDB's signed community repository:
+
+```sql
+INSTALL dc FROM community;
+LOAD dc;
+```
+
+## Community release checklist
+
+A GitHub release does not update the community repository. For every release intended for community users:
+
+1. Build and test all supported DuckDB versions and platforms.
+2. Update `extensions/dc/description.yml` in `duckdb/community-extensions` through a separate PR. Pin the tested source commit in `ref` (2.0), `variegata` (1.5), and `andium` (1.4).
+3. Request explicit builds for older DuckDB versions when the upstream automatic jobs are disabled. Descriptor pins alone do not publish historical binaries.
+4. After merge and deployment, verify a fresh `INSTALL dc FROM community; LOAD dc;` with each target runtime and platform, then check the public compatibility matrix.
+
+The CMake build selects version-specific APIs directly from DuckDB's version, so the community workflow does not need private build-script flags.
